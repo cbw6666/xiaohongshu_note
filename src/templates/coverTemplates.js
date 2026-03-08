@@ -1,5 +1,5 @@
 /**
- * 10大封面模板 — 复刻稿定设计风格
+ * 20大封面模板 — 复刻稿定设计风格
  * Canvas尺寸：1242 × 1660 (3:4)
  * 每个模板使用不同字体
  */
@@ -672,6 +672,872 @@ export const COVER_TEMPLATES = [
       ctx.beginPath(); ctx.arc(w - 100, h - 200, 160, 0, Math.PI * 2); ctx.fill()
       ctx.strokeStyle = 'rgba(168,216,234,0.3)'; ctx.lineWidth = 3
       ctx.beginPath(); ctx.moveTo(w * 0.3, h - 120); ctx.lineTo(w * 0.7, h - 120); ctx.stroke()
+    },
+  },
+
+  // ===== 11. 撕纸便利贴风 — 手写楷体 =====
+  {
+    id: 'torn_sticky_note',
+    name: '撕纸便利贴风',
+    desc: '软木板底+粉色便利贴+胶带装饰+手写体',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.MASHAN
+
+      // 软木板纹理背景
+      ctx.fillStyle = '#F5E6CA'
+      ctx.fillRect(0, 0, w, h)
+      // 小圆点模拟软木纹理
+      ctx.fillStyle = 'rgba(180,150,100,0.08)'
+      for (let i = 0; i < 300; i++) {
+        const rx = Math.random() * w
+        const ry = Math.random() * h
+        const rr = 2 + Math.random() * 6
+        ctx.beginPath(); ctx.arc(rx, ry, rr, 0, Math.PI * 2); ctx.fill()
+      }
+
+      // 便利贴主体（微微旋转+阴影）
+      ctx.save()
+      ctx.translate(w / 2, h / 2)
+      ctx.rotate(-0.02)
+
+      // 阴影
+      ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 40; ctx.shadowOffsetX = 8; ctx.shadowOffsetY = 12
+      ctx.fillStyle = '#FFF0F5'
+      roundRect(ctx, -480, -620, 960, 1240, 12)
+      ctx.fill()
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0
+
+      // 便利贴边框（极淡）
+      ctx.strokeStyle = 'rgba(220,180,190,0.4)'
+      ctx.lineWidth = 2
+      roundRect(ctx, -480, -620, 960, 1240, 12)
+      ctx.stroke()
+
+      // 撕纸顶部锯齿效果
+      ctx.fillStyle = '#FFF0F5'
+      ctx.beginPath()
+      ctx.moveTo(-480, -620)
+      for (let x = -480; x < 480; x += 24) {
+        ctx.lineTo(x + 12, -620 - 8 - Math.random() * 10)
+        ctx.lineTo(x + 24, -620)
+      }
+      ctx.lineTo(480, -620)
+      ctx.closePath()
+      ctx.fill()
+
+      // 顶部胶带装饰
+      ctx.save()
+      ctx.rotate(0.05)
+      ctx.fillStyle = 'rgba(200,225,180,0.55)'
+      ctx.fillRect(-120, -640, 240, 70)
+      // 胶带纹理线
+      ctx.strokeStyle = 'rgba(180,210,160,0.3)'
+      ctx.lineWidth = 1
+      for (let ly = -635; ly < -575; ly += 8) {
+        ctx.beginPath(); ctx.moveTo(-115, ly); ctx.lineTo(115, ly); ctx.stroke()
+      }
+      ctx.restore()
+
+      // 主标题
+      ctx.fillStyle = '#3A2A2A'
+      ctx.font = `400 108px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, 820)
+      const lh = 128
+      const blockH = lines.length * lh
+      const startY = -blockH / 2 - 40
+
+      lines.forEach((line, i) => {
+        ctx.fillText(line, 0, startY + i * lh)
+      })
+
+      // 分割线装饰
+      const divY = startY + blockH + 20
+      ctx.strokeStyle = 'rgba(220,160,170,0.5)'
+      ctx.lineWidth = 3
+      ctx.setLineDash([12, 8])
+      ctx.beginPath(); ctx.moveTo(-300, divY); ctx.lineTo(300, divY); ctx.stroke()
+      ctx.setLineDash([])
+
+      // 副标题
+      if (data.subtitle) {
+        const subY = divY + 70
+        ctx.fillStyle = '#C06070'
+        fitFontSize(ctx, data.subtitle, 820, 62, 36, `400 62px ${F}`)
+        ctx.fillText(data.subtitle, 0, subY)
+
+        // 粉色下划线
+        const tw = ctx.measureText(data.subtitle).width
+        ctx.strokeStyle = '#E8A0B0'
+        ctx.lineWidth = 5
+        ctx.beginPath(); ctx.moveTo(-tw / 2, subY + 40); ctx.lineTo(tw / 2, subY + 40); ctx.stroke()
+      }
+
+      // 底部装饰小图标
+      ctx.font = '44px sans-serif'
+      ctx.fillStyle = 'rgba(200,150,160,0.6)'
+      ctx.fillText('✦  ♡  ✦', 0, 520)
+
+      ctx.restore()
+
+      // 右下角图钉装饰
+      ctx.fillStyle = '#E07070'
+      ctx.beginPath(); ctx.arc(w * 0.78, h * 0.15, 18, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = '#C05050'
+      ctx.beginPath(); ctx.arc(w * 0.78, h * 0.15, 8, 0, Math.PI * 2); ctx.fill()
+
+      // 左下角淡色装饰
+      ctx.fillStyle = 'rgba(220,180,150,0.12)'
+      ctx.beginPath(); ctx.arc(100, h - 120, 140, 0, Math.PI * 2); ctx.fill()
+    },
+  },
+
+  // ===== 12. 格子笔记圈重点风 — 超粗黑体+绿色椭圆+橙色箭头 =====
+  {
+    id: 'grid_note_circle',
+    name: '格子笔记圈重点风',
+    desc: '格子底+横线装饰+超粗黑字+绿色椭圆圈重点+橙色虚线箭头',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 白底
+      ctx.fillStyle = '#FBFBFB'
+      ctx.fillRect(0, 0, w, h)
+      // 浅灰格子
+      ctx.strokeStyle = 'rgba(200,200,200,0.22)'
+      ctx.lineWidth = 1
+      const gs = 46
+      for (let x = 0; x < w; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke() }
+      for (let y = 0; y < h; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke() }
+
+      // 顶部横线装饰（模拟笔记本顶部分割线）
+      ctx.strokeStyle = 'rgba(180,180,180,0.4)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(50, 120); ctx.lineTo(w - 50, 120); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(50, 145); ctx.lineTo(w - 50, 145); ctx.stroke()
+
+      // 右上角橙色虚线圆圈+箭头
+      ctx.save()
+      ctx.translate(w * 0.72, h * 0.18)
+      ctx.strokeStyle = '#E8A040'; ctx.lineWidth = 5; ctx.setLineDash([10, 7])
+      ctx.beginPath(); ctx.arc(0, 0, 55, 0.4, Math.PI * 1.85); ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = '#E8A040'
+      ctx.beginPath(); ctx.moveTo(38, 40); ctx.lineTo(58, 24); ctx.lineTo(40, 12); ctx.closePath(); ctx.fill()
+      ctx.restore()
+
+      // 主标题 — 居中超粗黑字
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 128px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 160
+      const blockH = lines.length * lh
+      const startY = h * 0.42 - blockH / 2
+
+      lines.forEach((line, i) => {
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, startY + i * lh)
+      })
+
+      // 第二行绿色椭圆圈重点
+      if (lines.length >= 2) {
+        const hlLine = lines[1]
+        const hlY = startY + lh
+        const hlW = ctx.measureText(hlLine).width
+        ctx.strokeStyle = '#4CAF50'; ctx.lineWidth = 7
+        ctx.beginPath(); ctx.ellipse(w / 2, hlY, hlW / 2 + 50, 82, -0.03, 0, Math.PI * 2); ctx.stroke()
+        // 椭圆尾巴小笔触
+        ctx.lineWidth = 5
+        ctx.beginPath()
+        ctx.moveTo(w / 2 + hlW / 2 + 55, hlY - 30)
+        ctx.quadraticCurveTo(w / 2 + hlW / 2 + 75, hlY - 60, w / 2 + hlW / 2 + 55, hlY - 70)
+        ctx.stroke()
+      }
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#777'
+        fitFontSize(ctx, data.subtitle, w - 240, 56, 32, `500 56px ${F}`)
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 40)
+      }
+
+      // 底部横线装饰
+      ctx.strokeStyle = 'rgba(180,180,180,0.4)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(50, h - 120); ctx.lineTo(w - 50, h - 120); ctx.stroke()
+    },
+  },
+
+  // ===== 13. 粉色画笔涂抹风 — 超粗黑体 =====
+  {
+    id: 'pink_brush_stroke',
+    name: '粉色画笔涂抹风',
+    desc: '粉色底+白色画笔涂抹区+超粗黑字+彩色下划线',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 粉色背景
+      ctx.fillStyle = '#F5A0B8'
+      ctx.fillRect(0, 0, w, h)
+
+      // 白色画笔涂抹区（模拟笔刷横扫效果）
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'
+      const brushY = h * 0.15
+      const brushH = h * 0.62
+      for (let i = 0; i < 18; i++) {
+        const by = brushY + (brushH / 18) * i
+        const bxOff = (Math.random() - 0.5) * 80
+        const bw = w * 0.72 + Math.random() * w * 0.16
+        const bx = (w - bw) / 2 + bxOff
+        const bh = brushH / 18 + 12
+        ctx.globalAlpha = 0.7 + Math.random() * 0.3
+        ctx.fillRect(bx, by, bw, bh)
+      }
+      ctx.globalAlpha = 1
+
+      // 补充边缘笔触（淡粉色拖尾）
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'
+      for (let i = 0; i < 8; i++) {
+        const ex = w * 0.08 + Math.random() * w * 0.12
+        const ey = brushY + Math.random() * brushH
+        ctx.fillRect(ex, ey, 60 + Math.random() * 40, 15 + Math.random() * 20)
+      }
+      for (let i = 0; i < 8; i++) {
+        const ex = w * 0.78 + Math.random() * w * 0.12
+        const ey = brushY + Math.random() * brushH
+        ctx.fillRect(ex, ey, 60 + Math.random() * 40, 15 + Math.random() * 20)
+      }
+
+      // 右上角装饰图标
+      ctx.fillStyle = 'rgba(0,0,0,0.15)'
+      ctx.font = '42px sans-serif'
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'
+      ctx.fillText('ⓘ  ☆', w - 80, 80)
+
+      // 主标题 — 居中超粗黑字
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 130px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 300)
+      const lh = 165
+      const blockH = lines.length * lh
+      const startY = h * 0.46 - blockH / 2
+
+      lines.forEach((line, i) => {
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, startY + i * lh)
+      })
+
+      // 关键词彩色下划线（第一行蓝色，最后一行红色）
+      if (lines.length >= 1) {
+        // 第一行尾部蓝色下划线
+        const l0 = lines[0]
+        const tw0 = ctx.measureText(l0).width
+        ctx.strokeStyle = '#5B9BD5'; ctx.lineWidth = 12; ctx.lineCap = 'round'
+        const ulY0 = startY + 68
+        const ulLen0 = Math.min(tw0 * 0.35, 200)
+        ctx.beginPath(); ctx.moveTo(w / 2 + tw0 / 2 - ulLen0, ulY0); ctx.lineTo(w / 2 + tw0 / 2, ulY0); ctx.stroke()
+      }
+      if (lines.length >= 2) {
+        // 最后一行尾部红色下划线
+        const lastLine = lines[lines.length - 1]
+        const twL = ctx.measureText(lastLine).width
+        ctx.strokeStyle = '#E8360E'; ctx.lineWidth = 12; ctx.lineCap = 'round'
+        const ulYL = startY + (lines.length - 1) * lh + 68
+        const ulLenL = Math.min(twL * 0.35, 200)
+        ctx.beginPath(); ctx.moveTo(w / 2 - twL / 2, ulYL); ctx.lineTo(w / 2 - twL / 2 + ulLenL, ulYL); ctx.stroke()
+      }
+      ctx.lineCap = 'butt'
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#666'
+        fitFontSize(ctx, data.subtitle, w - 300, 52, 30, `500 52px ${F}`)
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 40)
+      }
+
+      // 右下角省略号装饰
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'
+      ctx.font = '56px sans-serif'
+      ctx.textAlign = 'right'
+      ctx.fillText('···', w - 80, h - 80)
+    },
+  },
+
+  // ===== 14. 蓝色横线笔记涂抹风 — 超粗黑体 =====
+  {
+    id: 'blue_lined_note',
+    name: '蓝色横线笔记涂抹风',
+    desc: '淡蓝底+横线+蓝色涂抹区+超粗黑字+气泡+OK手势',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 淡蓝背景
+      ctx.fillStyle = '#E8F0FA'
+      ctx.fillRect(0, 0, w, h)
+
+      // 横线
+      ctx.strokeStyle = 'rgba(180,200,230,0.5)'
+      ctx.lineWidth = 1.5
+      for (let y = 100; y < h - 60; y += 64) {
+        ctx.beginPath(); ctx.moveTo(50, y); ctx.lineTo(w - 50, y); ctx.stroke()
+      }
+
+      // 蓝灰色涂抹区（笔刷效果）
+      ctx.fillStyle = 'rgba(170,190,220,0.3)'
+      const brushY = h * 0.28
+      const brushH = h * 0.42
+      for (let i = 0; i < 14; i++) {
+        const by = brushY + (brushH / 14) * i
+        const bw = w * 0.65 + Math.random() * w * 0.2
+        const bx = (w - bw) / 2 + (Math.random() - 0.5) * 60
+        ctx.globalAlpha = 0.4 + Math.random() * 0.35
+        ctx.fillRect(bx, by, bw, brushH / 14 + 10)
+      }
+      ctx.globalAlpha = 1
+
+      // 左上角对话气泡
+      ctx.fillStyle = '#1A1A1A'
+      ctx.save()
+      ctx.translate(110, 140)
+      roundRect(ctx, 0, 0, 100, 72, 12); ctx.fill()
+      ctx.beginPath(); ctx.moveTo(25, 72); ctx.lineTo(15, 95); ctx.lineTo(45, 72); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = '#FFFFFF'
+      ctx.font = '32px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText('···', 50, 36)
+      ctx.restore()
+
+      // 主标题
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 120px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 240)
+      const lh = 155
+      const blockH = lines.length * lh
+      const startY = h * 0.48 - blockH / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+        // 第一行加黄色椭圆高亮
+        if (i === 0) {
+          const tw = ctx.measureText(line).width
+          ctx.strokeStyle = '#E8C840'; ctx.lineWidth = 5
+          ctx.beginPath(); ctx.ellipse(w / 2, y, tw / 2 + 40, 70, 0, 0, Math.PI * 2); ctx.stroke()
+        }
+        // 最后一行加波浪下划线
+        if (i === lines.length - 1 && lines.length >= 2) {
+          const tw = ctx.measureText(line).width
+          ctx.strokeStyle = '#E8C840'; ctx.lineWidth = 5
+          drawWavyLine(ctx, w / 2 - tw / 2, y + 65, tw)
+        }
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, y)
+      })
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#555'
+        fitFontSize(ctx, data.subtitle, w - 240, 52, 30, `500 52px ${F}`)
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 40)
+      }
+
+      // 右下角OK手势
+      ctx.save()
+      ctx.translate(w - 200, h - 230)
+      ctx.strokeStyle = '#1A1A1A'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      // 手掌
+      ctx.beginPath()
+      ctx.arc(50, 50, 45, 0, Math.PI * 2); ctx.stroke()
+      ctx.font = 'bold 36px sans-serif'; ctx.fillStyle = '#1A1A1A'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText('OK!', 50, 50)
+      ctx.restore()
+      ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'
+    },
+  },
+
+  // ===== 15. 备忘录风格 — 超粗黑体+橙色副标题+彩色装饰 =====
+  {
+    id: 'memo_style',
+    name: '备忘录风格',
+    desc: '白底+备忘录顶栏+超粗黑字+蓝色色块高亮+橙色副标题+彩色涂鸦装饰',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 白底微纹理
+      ctx.fillStyle = '#FAFAF8'
+      ctx.fillRect(0, 0, w, h)
+      // 淡点阵纹理
+      ctx.fillStyle = 'rgba(200,200,200,0.06)'
+      for (let i = 0; i < 200; i++) {
+        const px = Math.random() * w, py = Math.random() * h
+        ctx.fillRect(px, py, 3, 3)
+      }
+
+      // 顶部备忘录导航栏
+      ctx.fillStyle = '#999'
+      ctx.font = `400 40px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText('< 备忘录', 60, 72)
+      ctx.textAlign = 'right'
+      ctx.font = '38px sans-serif'
+      ctx.fillText('✉  ⇧  ···', w - 60, 72)
+
+      // 分隔线
+      ctx.strokeStyle = '#E8E8E8'; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.moveTo(50, 110); ctx.lineTo(w - 50, 110); ctx.stroke()
+
+      // 主标题 — 居中超粗
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 135px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 180
+      const blockH = lines.length * lh
+      const startY = h * 0.32 - blockH / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, y)
+      })
+
+      // 第二行加蓝色色块高亮
+      if (lines.length >= 2) {
+        const hlLine = lines[1]
+        const hlY = startY + lh
+        const hlW = ctx.measureText(hlLine).width
+        ctx.fillStyle = 'rgba(135,190,230,0.4)'
+        roundRect(ctx, w / 2 - hlW / 2 - 20, hlY - 70, hlW + 40, 145, 20)
+        ctx.fill()
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(hlLine, w / 2, hlY)
+      }
+
+      // 副标题 — 橙色大字
+      if (data.subtitle) {
+        ctx.fillStyle = '#E8960E'
+        fitFontSize(ctx, data.subtitle, w - 200, 135, 60, `900 135px ${F}`)
+        const subY = startY + blockH + 20
+        ctx.fillText(data.subtitle, w / 2, subY)
+      }
+
+      // 左侧粉色旋转箭头装饰
+      ctx.save()
+      ctx.translate(140, h * 0.68)
+      ctx.strokeStyle = '#E8A0C0'; ctx.lineWidth = 5; ctx.lineCap = 'round'
+      ctx.beginPath(); ctx.arc(0, 0, 40, 0.6, Math.PI * 1.8); ctx.stroke()
+      ctx.fillStyle = '#E8A0C0'
+      ctx.beginPath(); ctx.moveTo(-30, 28); ctx.lineTo(-45, 8); ctx.lineTo(-18, 14); ctx.closePath(); ctx.fill()
+      ctx.restore()
+
+      // 右侧蓝色波浪线装饰
+      ctx.strokeStyle = 'rgba(130,190,230,0.5)'; ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.moveTo(w - 120, h * 0.55)
+      ctx.quadraticCurveTo(w - 100, h * 0.55 - 15, w - 80, h * 0.55)
+      ctx.quadraticCurveTo(w - 60, h * 0.55 + 15, w - 40, h * 0.55)
+      ctx.stroke()
+
+      // 右侧粉色双感叹号
+      ctx.fillStyle = '#E8A0C0'
+      ctx.font = 'bold 50px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('!!', w - 100, h * 0.78)
+
+      // 底部小图标
+      ctx.fillStyle = '#CCC'
+      ctx.font = '38px sans-serif'
+      ctx.textAlign = 'left'; ctx.fillText('🔒', 70, h - 70)
+      ctx.textAlign = 'right'; ctx.fillText('✎', w - 70, h - 70)
+
+      ctx.lineCap = 'butt'
+    },
+  },
+
+  // ===== 16. 薄荷收藏指南风 — 超粗黑体 =====
+  {
+    id: 'mint_guide',
+    name: '薄荷收藏指南风',
+    desc: '白底+左上角标签+薄荷色高亮+超粗黑字+手指图标+底部色条',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 纯白背景
+      ctx.fillStyle = '#FFFFFF'
+      ctx.fillRect(0, 0, w, h)
+
+      // 左上角「建议收藏」标签
+      ctx.fillStyle = '#1A1A1A'
+      roundRect(ctx, 70, 80, 300, 100, 8)
+      ctx.fill()
+      ctx.fillStyle = '#FFFFFF'
+      ctx.font = `900 52px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText('建议收藏', 220, 130)
+
+      // 主标题 — 居中超粗黑字
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 145px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 190
+      const blockH = lines.length * lh
+      const startY = h * 0.38 - blockH / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, y)
+      })
+
+      // 第二行加薄荷绿色高亮色块
+      if (lines.length >= 2) {
+        const hlLine = lines[1]
+        const hlY = startY + lh
+        const hlW = ctx.measureText(hlLine).width
+        ctx.fillStyle = '#A0E8D8'
+        ctx.fillRect(w / 2 - hlW / 2 - 15, hlY - 75, hlW + 30, 155)
+        // 重绘该行文字
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(hlLine, w / 2, hlY)
+      }
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#555'
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `500 56px ${F}`)
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 50)
+      }
+
+      // 右下角手指点击图标
+      ctx.save()
+      ctx.translate(w - 260, h - 400)
+      ctx.strokeStyle = '#1A1A1A'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      // 手掌轮廓
+      ctx.beginPath()
+      ctx.moveTo(50, 120); ctx.lineTo(50, 50); ctx.quadraticCurveTo(50, 20, 70, 20)
+      ctx.quadraticCurveTo(90, 20, 90, 50); ctx.lineTo(90, 40)
+      ctx.quadraticCurveTo(90, 20, 110, 20); ctx.quadraticCurveTo(130, 20, 130, 45)
+      ctx.lineTo(130, 35); ctx.quadraticCurveTo(130, 15, 150, 15)
+      ctx.quadraticCurveTo(170, 15, 170, 40); ctx.lineTo(170, 120)
+      ctx.quadraticCurveTo(170, 155, 140, 155); ctx.lineTo(80, 155)
+      ctx.quadraticCurveTo(50, 155, 50, 120)
+      ctx.stroke()
+      // 食指
+      ctx.beginPath(); ctx.moveTo(30, 70); ctx.lineTo(30, 0)
+      ctx.quadraticCurveTo(30, -25, 50, -25); ctx.quadraticCurveTo(70, -25, 70, 0)
+      ctx.lineTo(70, 50); ctx.stroke()
+      ctx.restore()
+      ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'
+
+      // 底部薄荷色条
+      ctx.fillStyle = '#A0E8D8'
+      ctx.fillRect(0, h - 180, w, 180)
+
+      // 底部左侧竖线+英文标签
+      ctx.fillStyle = '#1A1A1A'
+      ctx.fillRect(80, h - 150, 6, 100)
+      ctx.font = `500 32px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'
+      ctx.fillText('GUIDELINE', 100, h - 145)
+      ctx.font = `400 28px ${F}`
+      ctx.fillText('COLLECTION', 100, h - 108)
+    },
+  },
+
+  // ===== 17. 手写黄色高亮风 — 手写楷体 =====
+  {
+    id: 'handwrite_yellow_hl',
+    name: '手写黄色高亮风',
+    desc: '白底+手写体+黄色色块高亮+蓝色关键词',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.MASHAN
+      // 纯白背景
+      ctx.fillStyle = '#FEFEFE'
+      ctx.fillRect(0, 0, w, h)
+
+      // 主标题 — 居中手写体
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `400 120px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 165
+      const blockH = lines.length * lh
+      const startY = h * 0.42 - blockH / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+        // 偶数行（从0开始的第1、3行）加黄色高亮色块
+        if (i % 2 === 1) {
+          const tw = ctx.measureText(line).width
+          ctx.fillStyle = '#FFD860'
+          ctx.globalAlpha = 0.5
+          ctx.fillRect(w / 2 - tw / 2 - 10, y - 55, tw + 20, 115)
+          ctx.globalAlpha = 1
+        }
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, y)
+      })
+
+      // 第一行中的部分蓝色字效果（模拟关键词蓝色）
+      // 在标题最后两个字用蓝色覆盖
+      if (lines.length >= 1) {
+        const firstLine = lines[0]
+        if (firstLine.length >= 2) {
+          const blueChars = firstLine.slice(-2)
+          const fullW = ctx.measureText(firstLine).width
+          const blueW = ctx.measureText(blueChars).width
+          ctx.fillStyle = '#4A7ABF'
+          ctx.fillText(blueChars, w / 2 + fullW / 2 - blueW / 2, startY)
+        }
+      }
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#888'
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `400 56px ${F}`)
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 50)
+      }
+    },
+  },
+
+  // ===== 18. 红圈重点白纸风 — 超粗黑体+红色 =====
+  {
+    id: 'red_circle_paper',
+    name: '红圈重点白纸风',
+    desc: '白纸微噪点+超粗黑字+红色椭圆圈重点+红色关键行+杂志风',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 白色微纹理背景
+      ctx.fillStyle = '#F8F6F4'
+      ctx.fillRect(0, 0, w, h)
+      // 微噪点
+      ctx.fillStyle = 'rgba(0,0,0,0.015)'
+      for (let i = 0; i < 400; i++) {
+        const px = Math.random() * w, py = Math.random() * h
+        ctx.fillRect(px, py, 2 + Math.random() * 2, 2 + Math.random() * 2)
+      }
+
+      // 主标题 — 居中超粗黑字
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 140px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 185
+      const blockH = lines.length * lh
+      const startY = h * 0.38 - blockH / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, y)
+      })
+
+      // 第一行加红色椭圆圈
+      if (lines.length >= 1) {
+        const hlLine = lines[0]
+        const hlW = ctx.measureText(hlLine).width
+        ctx.strokeStyle = '#D03030'; ctx.lineWidth = 7
+        ctx.beginPath()
+        ctx.ellipse(w / 2, startY, hlW / 2 + 45, 85, -0.05, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+
+      // 第三行红色字（关键词强调行）
+      if (lines.length >= 3) {
+        const redLine = lines[2]
+        const redY = startY + 2 * lh
+        ctx.fillStyle = '#D03030'
+        ctx.fillText(redLine, w / 2, redY)
+      }
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#777'
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `500 56px ${F}`)
+        ctx.textAlign = 'center'
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 50)
+      }
+    },
+  },
+
+  // ===== 19. 复古笔记夹风 — 手写潦草体 =====
+  {
+    id: 'vintage_clipboard',
+    name: '复古笔记夹风',
+    desc: '灰色皮革底+笔记夹+横线纸+手写体+钢笔装饰',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.LONGCANG
+      // 灰色皮革纹理背景
+      ctx.fillStyle = '#8A8580'
+      ctx.fillRect(0, 0, w, h)
+      ctx.fillStyle = 'rgba(0,0,0,0.05)'
+      for (let i = 0; i < 500; i++) {
+        const px = Math.random() * w, py = Math.random() * h
+        ctx.fillRect(px, py, 1 + Math.random() * 3, 1 + Math.random() * 3)
+      }
+
+      // 笔记纸主体（带阴影）
+      const padX = 100, padY = 200, padW = w - 200, padH = h - 340
+      ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 10
+      ctx.fillStyle = '#FAF8F2'
+      roundRect(ctx, padX, padY, padW, padH, 6)
+      ctx.fill()
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0
+
+      // 横线
+      ctx.strokeStyle = 'rgba(180,175,165,0.35)'
+      ctx.lineWidth = 1.5
+      for (let y = padY + 80; y < padY + padH - 40; y += 56) {
+        ctx.beginPath(); ctx.moveTo(padX + 40, y); ctx.lineTo(padX + padW - 40, y); ctx.stroke()
+      }
+
+      // 顶部标题栏分隔线
+      ctx.strokeStyle = 'rgba(160,155,145,0.4)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(padX + 40, padY + 70); ctx.lineTo(padX + padW - 40, padY + 70); ctx.stroke()
+
+      // 顶部标签文字
+      ctx.fillStyle = '#AAA'
+      ctx.font = `400 28px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText('NOTE', padX + 50, padY + 45)
+      ctx.textAlign = 'right'
+      ctx.fillText('202X.01.01', padX + padW - 50, padY + 45)
+
+      // 笔记夹（顶部棕色夹子）
+      ctx.fillStyle = '#7B5B3A'
+      roundRectTop(ctx, w / 2 - 120, padY - 55, 240, 75, 14)
+      ctx.fill()
+      ctx.fillStyle = '#6B4B2A'
+      ctx.fillRect(w / 2 - 100, padY - 15, 200, 20)
+
+      // 主标题 — 手写体居中
+      ctx.fillStyle = '#3A3530'
+      ctx.font = `400 78px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      const maxTitleW = padW - 120
+      const lines = smartWrap(ctx, data.title, maxTitleW)
+      const lh = 95
+      const blockH = lines.length * lh
+      const startY = padY + (padH - blockH) / 2 + 20
+
+      lines.forEach((line, i) => {
+        ctx.fillText(line, padX + 60, startY + i * lh)
+      })
+
+      // 副标题 — 右下角署名
+      if (data.subtitle) {
+        ctx.fillStyle = '#888'
+        ctx.font = `400 48px ${F}`
+        ctx.textAlign = 'right'
+        fitFontSize(ctx, data.subtitle, maxTitleW - 40, 48, 28, `400 48px ${F}`)
+        ctx.fillText('—— ' + data.subtitle, padX + padW - 60, startY + blockH + 50)
+      }
+
+      // 右侧钢笔装饰
+      ctx.save()
+      ctx.translate(w - 170, h * 0.3)
+      ctx.rotate(0.15)
+      // 笔杆
+      ctx.fillStyle = '#B0B5B8'
+      roundRect(ctx, 0, 0, 22, 320, 4); ctx.fill()
+      // 笔尖
+      ctx.fillStyle = '#666'
+      ctx.beginPath(); ctx.moveTo(2, 320); ctx.lineTo(20, 320); ctx.lineTo(11, 365); ctx.closePath(); ctx.fill()
+      // 笔夹
+      ctx.fillStyle = '#CCC'
+      ctx.fillRect(-6, 20, 8, 100)
+      ctx.restore()
+    },
+  },
+
+  // ===== 20. 线圈笔记本风 — 手写潦草体 =====
+  {
+    id: 'spiral_notebook',
+    name: '线圈笔记本风',
+    desc: '米白纸底+左侧线圈+横线+手写体+勾选框+钢笔装饰',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.LONGCANG
+      // 米白色纸张背景
+      ctx.fillStyle = '#FAF7F0'
+      ctx.fillRect(0, 0, w, h)
+
+      // 微纹理
+      ctx.fillStyle = 'rgba(200,190,170,0.04)'
+      for (let i = 0; i < 200; i++) {
+        const px = Math.random() * w, py = Math.random() * h
+        ctx.fillRect(px, py, 2, 2)
+      }
+
+      // 横线
+      ctx.strokeStyle = 'rgba(190,185,175,0.4)'
+      ctx.lineWidth = 1.5
+      const lineStart = 200
+      const lineGap = 62
+      for (let y = lineStart; y < h - 80; y += lineGap) {
+        ctx.beginPath(); ctx.moveTo(100, y); ctx.lineTo(w - 80, y); ctx.stroke()
+      }
+
+      // 左侧勾选框
+      ctx.strokeStyle = 'rgba(180,175,165,0.5)'
+      ctx.lineWidth = 2
+      for (let y = lineStart; y < h - 200; y += lineGap) {
+        ctx.strokeRect(110, y + lineGap / 2 - 14, 28, 28)
+      }
+
+      // 顶部线圈装饰
+      const ringCount = 7
+      const ringSpacing = (w - 300) / (ringCount - 1)
+      for (let i = 0; i < ringCount; i++) {
+        const cx = 180 + i * ringSpacing
+        // 金属线圈
+        ctx.strokeStyle = '#C0C0C0'
+        ctx.lineWidth = 6
+        ctx.beginPath(); ctx.arc(cx, 120, 28, 0.5, Math.PI * 2 - 0.5); ctx.stroke()
+        ctx.strokeStyle = '#D8D8D8'
+        ctx.lineWidth = 4
+        ctx.beginPath(); ctx.arc(cx, 120, 28, Math.PI + 0.5, Math.PI * 2 - 0.5); ctx.stroke()
+      }
+
+      // 主标题 — 手写体居中
+      ctx.fillStyle = '#3A3530'
+      ctx.font = `400 70px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const maxTitleW = w - 280
+      const lines = smartWrap(ctx, data.title, maxTitleW)
+      const lh = lineGap
+      // 计算文字总高度，将整体垂直居中于笔记本纸面
+      const totalTextH = lines.length * lh + (data.subtitle ? lh : 0)
+      const contentTop = lineStart + lh  // 纸面内容区顶部
+      const contentBot = h - 80          // 纸面内容区底部
+      const startY = contentTop + (contentBot - contentTop - totalTextH) / 2 + lh / 2
+
+      lines.forEach((line, i) => {
+        ctx.fillText(line, w / 2, startY + i * lh)
+      })
+
+      // 副标题 — 居中署名
+      if (data.subtitle) {
+        ctx.fillStyle = '#888'
+        ctx.font = `400 48px ${F}`
+        ctx.textAlign = 'center'
+        fitFontSize(ctx, data.subtitle, maxTitleW - 40, 48, 28, `400 48px ${F}`)
+        const subY = startY + lines.length * lh + lh
+        ctx.fillText('—— ' + data.subtitle, w / 2, subY)
+      }
+
+      // 右侧钢笔装饰
+      ctx.save()
+      ctx.translate(w - 140, h * 0.25)
+      ctx.rotate(0.12)
+      ctx.fillStyle = '#C0C5C8'
+      roundRect(ctx, 0, 0, 20, 280, 4); ctx.fill()
+      ctx.fillStyle = '#888'
+      ctx.beginPath(); ctx.moveTo(2, 280); ctx.lineTo(18, 280); ctx.lineTo(10, 318); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = '#DDD'
+      ctx.fillRect(-5, 20, 7, 80)
+      // 笔帽按钮
+      ctx.fillStyle = '#AAA'
+      ctx.beginPath(); ctx.arc(10, -8, 12, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
     },
   },
 ]
