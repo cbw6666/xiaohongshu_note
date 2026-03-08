@@ -1,23 +1,21 @@
 import { useState } from 'react'
-import { exportAll, downloadCSV } from '../utils/exportUtils.js'
+import { exportExcel } from '../utils/exportUtils.js'
 
 export default function ExportPanel({ notes }) {
   const [exporting, setExporting] = useState(false)
+  const [progress, setProgress] = useState(null)
 
-  const handleExportAll = async () => {
+  const handleExport = async () => {
     if (notes.length === 0) return
     setExporting(true)
+    setProgress({ current: 0, total: notes.length })
     try {
-      await exportAll(notes)
+      await exportExcel(notes, setProgress)
     } catch (err) {
       alert('导出失败: ' + err.message)
     }
     setExporting(false)
-  }
-
-  const handleExportCSV = () => {
-    if (notes.length === 0) return
-    downloadCSV(notes)
+    setProgress(null)
   }
 
   return (
@@ -27,17 +25,12 @@ export default function ExportPanel({ notes }) {
       <div className="btn-row">
         <button
           className="btn-primary"
-          onClick={handleExportAll}
+          onClick={handleExport}
           disabled={notes.length === 0 || exporting}
         >
-          {exporting ? '打包中...' : '📦 导出全部（CSV + 封面图 ZIP）'}
-        </button>
-        <button
-          className="btn-secondary"
-          onClick={handleExportCSV}
-          disabled={notes.length === 0}
-        >
-          📄 仅导出CSV文案
+          {exporting
+            ? `导出中 (${progress?.current || 0}/${progress?.total || notes.length})...`
+            : '📊 导出 Excel（含封面图）'}
         </button>
       </div>
     </div>

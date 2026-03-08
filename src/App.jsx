@@ -115,7 +115,7 @@ export default function App() {
             </div>
             {activeShop && (
               <div className="shop-detail">
-                <ProductManager shop={activeShop} onUpdateShop={handleUpdateShop} />
+                <ProductManager shop={activeShop} onUpdateShop={handleUpdateShop} settings={settings} />
                 <AccountManager shop={activeShop} onUpdateShop={handleUpdateShop} />
               </div>
             )}

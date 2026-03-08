@@ -2,6 +2,7 @@ const KEYS = {
   SETTINGS: 'rb_settings',
   SHOPS: 'rb_shops',
   GENERATED: 'rb_generated',
+  STYLE_TEMPLATES: 'rb_style_templates',
 }
 
 export function loadSettings() {
@@ -11,9 +12,8 @@ export function loadSettings() {
       apiKey: '',
       endpointId: '',
       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-      notesPerAccount: 5,
     }
-  } catch { return { apiKey: '', endpointId: '', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', notesPerAccount: 5 } }
+  } catch { return { apiKey: '', endpointId: '', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' } }
 }
 
 export function saveSettings(settings) {
@@ -40,4 +40,15 @@ export function loadGenerated() {
 
 export function saveGenerated(notes) {
   localStorage.setItem(KEYS.GENERATED, JSON.stringify(notes))
+}
+
+export function loadStyleTemplates() {
+  try {
+    const raw = localStorage.getItem(KEYS.STYLE_TEMPLATES)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+export function saveStyleTemplates(templates) {
+  localStorage.setItem(KEYS.STYLE_TEMPLATES, JSON.stringify(templates))
 }

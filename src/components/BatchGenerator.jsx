@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
-import { callAI, buildNotePrompt, parseNoteResponse } from '../services/aiService.js'
+import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitlePrompt } from '../services/aiService.js'
 
 export default function BatchGenerator({ settings, shops, onGenerated }) {
   const [generating, setGenerating] = useState(false)
@@ -115,7 +115,7 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
           for (let i = 0; i < noteCount; i++) {
             if (abortRef.current) break
 
-            const coverTemplateId = selectedCoverTemplates[count % selectedCoverTemplates.length]
+            const coverTemplateId = product.customCoverTemplateId || selectedCoverTemplates[count % selectedCoverTemplates.length]
 
             count++
             setProgress({
@@ -124,10 +124,33 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
               text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇`,
             })
 
+            // 清理商品名称中可能混入的商品ID等信息
+            const cleanName = (product.name || '').replace(/\n?\s*商品\s*ID\s*[:：]\s*[\s\S]*/i, '').replace(/\n?\s*预览\s*$/, '').trim()
+            const itemId = product.productId || ((product.name || '').match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9]+)/i) || [])[1] || ''
+
             try {
               const messages = buildNotePrompt(product)
               const raw = await callAI(settings, messages)
               const parsed = parseNoteResponse(raw)
+
+              // 校验标题字数，超过20字则只重新生成标题（最多重试2次）
+              let finalTitle = parsed.title
+              const MAX_TITLE_LEN = 20
+              const MAX_RETITLE_RETRIES = 2
+              if (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN) {
+                for (let retry = 0; retry < MAX_RETITLE_RETRIES; retry++) {
+                  try {
+                    const retitleMessages = buildRetitlePrompt(finalTitle, parsed.content, product.name)
+                    const newTitle = (await callAI(settings, retitleMessages)).trim()
+                    if (newTitle && calcTitleLen(newTitle) <= MAX_TITLE_LEN) {
+                      finalTitle = newTitle
+                      break
+                    }
+                  } catch (e) {
+                    console.warn('重新生成标题失败:', e)
+                  }
+                }
+              }
 
               results.push({
                 id: `${Date.now()}_${count}`,
@@ -136,14 +159,14 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
                 accountId: account.id,
                 accountName: account.name,
                 productId: product.id,
-                productItemId: product.productId || '',
-                productName: product.name,
+                productItemId: itemId,
+                productName: cleanName,
                 coverTemplateId,
-                title: parsed.title || `${product.name}种草`,
+                title: finalTitle || `${cleanName}种草`,
                 content: parsed.content || raw,
                 tags: parsed.tags || '',
-                coverTitle: parsed.coverTitle || product.name.slice(0, 8),
-                coverSubtitle: parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || '',
+                coverTitle: product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8),
+                coverSubtitle: product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || '',
                 raw,
                 createdAt: new Date().toISOString(),
               })
@@ -156,14 +179,14 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
                 accountId: account.id,
                 accountName: account.name,
                 productId: product.id,
-                productItemId: product.productId || '',
-                productName: product.name,
+                productItemId: itemId,
+                productName: cleanName,
                 coverTemplateId,
-                title: `[生成失败] ${product.name}`,
+                title: `[生成失败] ${cleanName}`,
                 content: `错误: ${err.message}`,
                 tags: '',
-                coverTitle: product.name.slice(0, 8),
-                coverSubtitle: '',
+                coverTitle: product.customCoverTitle || cleanName.slice(0, 8),
+                coverSubtitle: product.customCoverSubtitle || '',
                 raw: '',
                 error: true,
                 createdAt: new Date().toISOString(),

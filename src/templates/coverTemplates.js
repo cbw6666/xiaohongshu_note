@@ -65,7 +65,8 @@ export const COVER_TEMPLATES = [
       // 副标题 — 居中
       if (data.subtitle) {
         ctx.fillStyle = '#888'
-        ctx.font = `500 56px ${F}`
+        const subMaxW = w - 200
+        fitFontSize(ctx, data.subtitle, subMaxW, 56, 32, `500 56px ${F}`)
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 40)
       }
 
@@ -124,7 +125,8 @@ export const COVER_TEMPLATES = [
       // 副标题彩色
       if (data.subtitle) {
         const subY = startY + blockH + 40
-        ctx.font = `400 62px ${F}`
+        const subMaxW = w - 280
+        fitFontSize(ctx, data.subtitle, subMaxW, 62, 36, `400 62px ${F}`)
         // 彩色关键词
         const colors = ['#FF69B4', '#E8A040', '#7CB9E8']
         const chars = data.subtitle.split('')
@@ -197,7 +199,7 @@ export const COVER_TEMPLATES = [
 
       if (data.subtitle) {
         ctx.fillStyle = '#666'
-        ctx.font = `500 56px ${F}`
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 32, `500 56px ${F}`)
         ctx.fillText(data.subtitle, w / 2, dotY + 100)
       }
 
@@ -262,7 +264,8 @@ export const COVER_TEMPLATES = [
       // 蓝色副标题条
       if (data.subtitle) {
         const subY = startY + blockH + 35
-        ctx.font = `400 56px ${F2}`
+        const subMaxW = w - 260
+        fitFontSize(ctx, data.subtitle, subMaxW, 56, 32, `400 56px ${F2}`)
         const tw = ctx.measureText(data.subtitle).width
         const barW = Math.min(tw + 70, w - 240)
         ctx.fillStyle = '#7CB9E8'
@@ -335,7 +338,7 @@ export const COVER_TEMPLATES = [
 
       if (data.subtitle) {
         ctx.fillStyle = '#888'
-        ctx.font = `500 52px ${F}`
+        fitFontSize(ctx, data.subtitle, maxW, 52, 30, `500 52px ${F}`)
         ctx.textAlign = 'center'
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 30)
       }
@@ -379,9 +382,12 @@ export const COVER_TEMPLATES = [
       ctx.font = `900 110px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, w - 280)
+      const scale = lines._scale || 1
+      const baseSize = Math.round(110 * scale)
+      const accentSize = Math.round(130 * scale)
 
       // 计算整体块高度
-      const titleLh = 180
+      const titleLh = Math.round(180 * scale)
       const titleBlockH = lines.length * titleLh
       const subH = data.subtitle ? 160 : 0
       const gap = 65
@@ -391,6 +397,7 @@ export const COVER_TEMPLATES = [
       lines.forEach((line, i) => {
         const y = startY + i * titleLh
         if (i === 0) {
+          ctx.font = `900 ${baseSize}px ${F}`
           const tw1 = ctx.measureText(line).width
           ctx.fillStyle = '#1A1A1A'
           roundRect(ctx, w / 2 - tw1 / 2 - 35, y - 68, tw1 + 70, 140, 8)
@@ -399,17 +406,17 @@ export const COVER_TEMPLATES = [
           ctx.fillText(line, w / 2, y)
         } else {
           ctx.fillStyle = '#E8360E'
-          ctx.font = `900 130px ${F}`
+          ctx.font = `900 ${accentSize}px ${F}`
           ctx.fillText(line, w / 2, y)
-          ctx.font = `900 110px ${F}`
+          ctx.font = `900 ${baseSize}px ${F}`
         }
       })
 
       if (data.subtitle) {
         ctx.fillStyle = '#E8360E'
         const maxSubW = w - 180
-        const subFont = `900 130px ${F}`
-        fitFontSize(ctx, data.subtitle, maxSubW, 130, 60, subFont)
+        const subFont = `900 ${accentSize}px ${F}`
+        fitFontSize(ctx, data.subtitle, maxSubW, accentSize, 60, subFont)
         const subY = startY + titleBlockH + gap
         ctx.fillText(data.subtitle, w / 2, subY)
       }
@@ -528,7 +535,7 @@ export const COVER_TEMPLATES = [
 
       if (data.subtitle) {
         ctx.fillStyle = '#777'
-        ctx.font = `400 56px ${F}`
+        fitFontSize(ctx, data.subtitle, w - 240, 56, 32, `400 56px ${F}`)
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 40)
       }
     },
@@ -593,7 +600,7 @@ export const COVER_TEMPLATES = [
 
       if (data.subtitle) {
         ctx.fillStyle = '#666'
-        ctx.font = `700 52px ${F}`
+        fitFontSize(ctx, data.subtitle, fW - 160, 52, 30, `700 52px ${F}`)
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 35)
       }
 
@@ -683,18 +690,47 @@ function fitFontSize(ctx, text, maxWidth, startSize, minSize, fontStyle) {
 }
 
 function smartWrap(ctx, text, maxWidth) {
-  if (!text) return ['']
+  if (!text) { const r = ['']; r._scale = 1; return r }
+
+  // 检测是否包含用户手动换行
+  const hasManualBreaks = text.includes('\n')
+
+  if (hasManualBreaks) {
+    // 严格按用户 \n 分行，绝不自动断行
+    const lines = text.split('\n').filter(Boolean)
+    if (!lines.length) { const r = ['']; r._scale = 1; return r }
+
+    // 检查是否有行超宽，如果有则缩小字号让所有行都能一行显示
+    const currentFont = ctx.font
+    const sizeMatch = currentFont.match(/(\d+)px/)
+    let scale = 1
+    if (sizeMatch) {
+      const origSize = parseInt(sizeMatch[1])
+      let fontSize = origSize
+      const minSize = Math.max(Math.floor(fontSize * 0.45), 36)
+      let needShrink = lines.some(line => ctx.measureText(line).width > maxWidth)
+      while (needShrink && fontSize > minSize) {
+        fontSize -= 2
+        ctx.font = currentFont.replace(/\d+px/, fontSize + 'px')
+        needShrink = lines.some(line => ctx.measureText(line).width > maxWidth)
+      }
+      scale = fontSize / origSize
+    }
+    lines._scale = scale
+    return lines
+  }
+
+  // 自动换行模式
   const chars = text.split('')
   let line = ''
   const lines = []
   for (const char of chars) {
-    if (char === '\n') { if (line) lines.push(line); line = ''; continue }
     const test = line + char
     if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = char }
     else { line = test }
   }
   if (line) lines.push(line)
-  if (!lines.length) return ['']
+  if (!lines.length) { const r = ['']; r._scale = 1; return r }
 
   // 尾行均衡：如果最后一行字数不足最长行的40%，重新均匀分配
   if (lines.length >= 2) {
@@ -708,16 +744,17 @@ function smartWrap(ctx, text, maxWidth) {
       let pos = 0
       while (pos < fullText.length) {
         let end = Math.min(pos + avgLen, fullText.length)
-        // 确保不超宽
         while (end > pos + 1 && ctx.measureText(fullText.slice(pos, end)).width > maxWidth) {
           end--
         }
         balanced.push(fullText.slice(pos, end))
         pos = end
       }
-      return balanced.length ? balanced : ['']
+      if (balanced.length) { balanced._scale = 1; return balanced }
+      const r = ['']; r._scale = 1; return r
     }
   }
+  lines._scale = 1
   return lines
 }
 

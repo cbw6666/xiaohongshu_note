@@ -43,16 +43,7 @@ export default function Settings({ settings, onSave }) {
           placeholder="https://ark.cn-beijing.volces.com/api/v3"
         />
       </div>
-      <div className="form-group">
-        <label>每账号每日笔记数</label>
-        <input
-          type="number"
-          min="1"
-          max="20"
-          value={form.notesPerAccount}
-          onChange={e => handleChange('notesPerAccount', parseInt(e.target.value) || 5)}
-        />
-      </div>
+
       <button className="btn-primary" onClick={handleSave}>
         {saved ? '✅ 已保存' : '保存配置'}
       </button>

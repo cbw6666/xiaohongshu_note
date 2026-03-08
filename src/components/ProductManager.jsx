@@ -1,42 +1,30 @@
 import { useState } from 'react'
-import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT } from '../services/aiService.js'
+import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, callAI, buildAnalysisPrompt } from '../services/aiService.js'
+import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
+import CoverCanvas from './CoverCanvas.jsx'
 
-export default function ProductManager({ shop, onUpdateShop }) {
-  const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({ name: '', productId: '', description: '', audience: '', sellingPoints: '' })
+export default function ProductManager({ shop, onUpdateShop, settings }) {
   const [promptEditing, setPromptEditing] = useState(null)
   const [promptForm, setPromptForm] = useState({ customSystemPrompt: '', customUserPrompt: '' })
   // 爆文参考
-  const [refEditing, setRefEditing] = useState(null) // 正在编辑爆文的商品ID
-  const [refForm, setRefForm] = useState({ title: '', content: '', tags: '' })
+  const [refEditing, setRefEditing] = useState(null)
+  const [refForm, setRefForm] = useState({ text: '' })
+  // AI 分析状态
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analysisPreview, setAnalysisPreview] = useState(null) // { text, analysis }
+  const [analysisError, setAnalysisError] = useState('')
+  // 风格模板
+  const [saveAsTemplate, setSaveAsTemplate] = useState(true)
+  const [templateName, setTemplateName] = useState('')
+  const [showTemplateList, setShowTemplateList] = useState(false)
+  // 封面自定义
+  const [coverEditing, setCoverEditing] = useState(null)
+  const [coverForm, setCoverForm] = useState({ coverTitle: '', coverSubtitle: '', coverTemplateId: '' })
+  const [coverPreviewTplId, setCoverPreviewTplId] = useState(COVER_TEMPLATES[0]?.id || '')
 
   if (!shop) return <div className="panel"><p className="empty-state">请先在左侧选择一个店铺</p></div>
 
   const products = shop.products || []
-
-  const resetForm = () => {
-    setForm({ name: '', productId: '', description: '', audience: '', sellingPoints: '' })
-    setEditing(null)
-  }
-
-  const handleEdit = (p) => {
-    setEditing(p.id)
-    setForm({
-      name: p.name,
-      productId: p.productId || '',
-      description: p.description || '',
-      audience: p.audience || '',
-      sellingPoints: p.sellingPoints || '',
-    })
-  }
-
-  const handleSave = () => {
-    onUpdateShop({
-      ...shop,
-      products: products.map(p => p.id === editing ? { ...p, ...form } : p),
-    })
-    resetForm()
-  }
 
   const handleDelete = (id) => {
     onUpdateShop({ ...shop, products: products.filter(p => p.id !== id) })
@@ -79,18 +67,21 @@ export default function ProductManager({ shop, onUpdateShop }) {
   // 爆文参考管理
   const handleOpenRef = (p) => {
     setRefEditing(p.id)
-    setRefForm({ title: '', content: '', tags: '' })
+    setRefForm({ text: '' })
+    setAnalysisPreview(null)
+    setAnalysisError('')
+    setSaveAsTemplate(true)
+    setTemplateName('')
+    setShowTemplateList(false)
   }
 
   const handleAddRef = () => {
-    if (!refForm.title.trim() && !refForm.content.trim()) return
+    if (!refForm.text.trim()) return
     const product = products.find(p => p.id === refEditing)
     if (!product) return
     const newRef = {
       id: Date.now().toString(),
-      title: refForm.title.trim(),
-      content: refForm.content.trim(),
-      tags: refForm.tags.trim(),
+      text: refForm.text.trim(),
     }
     onUpdateShop({
       ...shop,
@@ -99,7 +90,90 @@ export default function ProductManager({ shop, onUpdateShop }) {
         : p
       ),
     })
-    setRefForm({ title: '', content: '', tags: '' })
+    setRefForm({ text: '' })
+    setAnalysisPreview(null)
+  }
+
+  // AI 分析后添加
+  const handleAnalyzeAndAdd = async () => {
+    if (!refForm.text.trim()) return
+    if (!settings?.apiKey || !settings?.endpointId) {
+      setAnalysisError('请先在设置页面配置 AI API Key 和推理接入点')
+      return
+    }
+
+    setAnalyzing(true)
+    setAnalysisError('')
+    setAnalysisPreview(null)
+
+    try {
+      const messages = buildAnalysisPrompt(refForm.text.trim())
+      const analysis = await callAI(settings, messages)
+      setAnalysisPreview({ text: refForm.text.trim(), analysis })
+    } catch (err) {
+      setAnalysisError(`分析失败: ${err.message}`)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  // 确认保存分析结果
+  const handleConfirmAnalysis = () => {
+    if (!analysisPreview) return
+    const product = products.find(p => p.id === refEditing)
+    if (!product) return
+    const newRef = {
+      id: Date.now().toString(),
+      text: analysisPreview.text,
+      analysis: analysisPreview.analysis,
+    }
+    // 是否同时保存为风格模板
+    let updatedTemplates = product.styleTemplates || []
+    if (saveAsTemplate && templateName.trim()) {
+      updatedTemplates = [...updatedTemplates, {
+        id: Date.now().toString() + '_t',
+        name: templateName.trim(),
+        sourceText: analysisPreview.text.slice(0, 200),
+        analysis: analysisPreview.analysis,
+        enabled: true,
+        createdAt: Date.now(),
+      }]
+    }
+    onUpdateShop({
+      ...shop,
+      products: products.map(p => p.id === refEditing
+        ? { ...p, references: [...(p.references || []), newRef], styleTemplates: updatedTemplates }
+        : p
+      ),
+    })
+    setRefForm({ text: '' })
+    setAnalysisPreview(null)
+    setTemplateName('')
+    setSaveAsTemplate(true)
+  }
+
+  // 切换风格模板启用/禁用
+  const handleToggleTemplate = (productId, templateId) => {
+    onUpdateShop({
+      ...shop,
+      products: products.map(p => p.id === productId
+        ? { ...p, styleTemplates: (p.styleTemplates || []).map(t =>
+            t.id === templateId ? { ...t, enabled: !t.enabled } : t
+          )}
+        : p
+      ),
+    })
+  }
+
+  // 删除风格模板
+  const handleDeleteTemplate = (productId, templateId) => {
+    onUpdateShop({
+      ...shop,
+      products: products.map(p => p.id === productId
+        ? { ...p, styleTemplates: (p.styleTemplates || []).filter(t => t.id !== templateId) }
+        : p
+      ),
+    })
   }
 
   const handleDeleteRef = (productId, refId) => {
@@ -112,61 +186,47 @@ export default function ProductManager({ shop, onUpdateShop }) {
     })
   }
 
+  // 封面自定义
+  const handleEditCover = (p) => {
+    setCoverEditing(p.id)
+    setCoverForm({
+      coverTitle: p.customCoverTitle || '',
+      coverSubtitle: p.customCoverSubtitle || '',
+      coverTemplateId: p.customCoverTemplateId || '',
+    })
+    setCoverPreviewTplId(p.customCoverTemplateId || COVER_TEMPLATES[0]?.id || '')
+  }
+
+  const handleSaveCover = () => {
+    onUpdateShop({
+      ...shop,
+      products: products.map(p => p.id === coverEditing ? {
+        ...p,
+        customCoverTitle: coverForm.coverTitle.trim() || undefined,
+        customCoverSubtitle: coverForm.coverSubtitle.trim() || undefined,
+        customCoverTemplateId: coverForm.coverTemplateId || undefined,
+      } : p),
+    })
+    setCoverEditing(null)
+  }
+
+  const handleClearCover = () => {
+    onUpdateShop({
+      ...shop,
+      products: products.map(p => p.id === coverEditing ? {
+        ...p,
+        customCoverTitle: undefined,
+        customCoverSubtitle: undefined,
+        customCoverTemplateId: undefined,
+      } : p),
+    })
+    setCoverEditing(null)
+  }
+
   return (
     <div className="panel">
       <h2>📦 商品管理 <span className="panel-sub">— {shop.name}</span></h2>
-      <p className="hint" style={{ marginBottom: 12 }}>商品从千帆导入，可补充信息、添加爆文参考、定制提示词</p>
-
-      {/* 基础信息编辑表单 */}
-      {editing && (
-        <>
-          <div className="form-grid">
-            <div className="form-group">
-              <label>商品名称</label>
-              <input
-                value={form.name}
-                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                placeholder="商品名称"
-              />
-            </div>
-            {form.productId && (
-              <div className="form-group">
-                <label>商品ID</label>
-                <span style={{ fontSize: 12, color: '#aaa', lineHeight: '38px' }}>{form.productId}</span>
-              </div>
-            )}
-            <div className="form-group">
-              <label>目标人群</label>
-              <input
-                value={form.audience}
-                onChange={e => setForm(p => ({ ...p, audience: e.target.value }))}
-                placeholder="例如：考研党、大学生"
-              />
-            </div>
-            <div className="form-group">
-              <label>核心卖点</label>
-              <input
-                value={form.sellingPoints}
-                onChange={e => setForm(p => ({ ...p, sellingPoints: e.target.value }))}
-                placeholder="用逗号分隔多个卖点"
-              />
-            </div>
-            <div className="form-group full-width">
-              <label>商品描述</label>
-              <textarea
-                value={form.description}
-                onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-                placeholder="简要描述资料内容和特点"
-                rows={2}
-              />
-            </div>
-          </div>
-          <div className="btn-row">
-            <button className="btn-primary" onClick={handleSave}>保存修改</button>
-            <button className="btn-secondary" onClick={resetForm}>取消</button>
-          </div>
-        </>
-      )}
+      <p className="hint" style={{ marginBottom: 12 }}>商品从千帆导入，可添加爆文参考（支持 AI 分析爆款因子）、定制提示词</p>
 
       {/* 爆文参考编辑面板 */}
       {refEditing && (
@@ -178,7 +238,7 @@ export default function ProductManager({ shop, onUpdateShop }) {
             🔥 爆文参考 — {products.find(p => p.id === refEditing)?.name}
           </h3>
           <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            粘贴小红书爆款笔记的标题和正文，系统会自动分析爆款因子并仿写。可添加多篇参考。
+            直接粘贴小红书爆款笔记（标题+正文+标签均可），系统会自动分析爆款因子并仿写。可添加多篇参考。
           </p>
 
           {/* 已添加的爆文列表 */}
@@ -186,34 +246,181 @@ export default function ProductManager({ shop, onUpdateShop }) {
             const refs = products.find(p => p.id === refEditing)?.references || []
             return refs.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                {refs.map((ref, idx) => (
-                  <div key={ref.id} style={{
-                    background: '#fff', border: '1px solid #ffe0b2', borderRadius: 8,
-                    padding: '10px 14px', marginBottom: 8, position: 'relative'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                          参考{idx + 1}：{ref.title || '(无标题)'}
+                {refs.map((ref, idx) => {
+                  // 兼容新旧格式：新格式用 ref.text，旧格式拼接 title+content
+                  const displayText = ref.text || [ref.title, ref.content, ref.tags].filter(Boolean).join('\n')
+                  return (
+                    <div key={ref.id} style={{
+                      background: '#fff', border: `1px solid ${ref.analysis ? '#ce93d8' : '#ffe0b2'}`, borderRadius: 8,
+                      padding: '10px 14px', marginBottom: 8, position: 'relative'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                            参考{idx + 1}
+                            {ref.analysis && (
+                              <span style={{ marginLeft: 8, fontSize: 11, color: '#7b1fa2', fontWeight: 600 }}>🔍 已分析爆款因子</span>
+                            )}
+                          </div>
+                          <div style={{
+                            fontSize: 12, color: '#666', lineHeight: 1.6,
+                            maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis',
+                            whiteSpace: 'pre-line'
+                          }}>
+                            {displayText.slice(0, 150)}{displayText.length > 150 ? '...' : ''}
+                          </div>
                         </div>
-                        <div style={{
-                          fontSize: 12, color: '#666', lineHeight: 1.6,
-                          maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis'
-                        }}>
-                          {ref.content?.slice(0, 100)}{ref.content?.length > 100 ? '...' : ''}
-                        </div>
-                        {ref.tags && (
-                          <div style={{ fontSize: 11, color: '#e65100', marginTop: 4 }}>{ref.tags}</div>
-                        )}
+                        <button
+                          className="btn-sm btn-danger"
+                          style={{ marginLeft: 10, flexShrink: 0 }}
+                          onClick={() => handleDeleteRef(refEditing, ref.id)}
+                        >删除</button>
                       </div>
-                      <button
-                        className="btn-sm btn-danger"
-                        style={{ marginLeft: 10, flexShrink: 0 }}
-                        onClick={() => handleDeleteRef(refEditing, ref.id)}
-                      >删除</button>
                     </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* AI 分析结果预览 */}
+          {analysisPreview && (
+            <div style={{
+              background: '#f3e5f5', border: '1px solid #ce93d8', borderRadius: 10,
+              padding: 16, marginBottom: 14
+            }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14, color: '#7b1fa2' }}>🔍 爆款因子分析结果</h4>
+              <div style={{
+                fontSize: 12, color: '#444', lineHeight: 1.8,
+                maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-line',
+                background: '#fff', borderRadius: 8, padding: 12
+              }}>
+                {analysisPreview.analysis}
+              </div>
+              {/* 保存为风格模板选项 */}
+              <div style={{
+                marginTop: 12, padding: '10px 14px', background: '#ede7f6',
+                borderRadius: 8, border: '1px solid #d1c4e9'
+              }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={saveAsTemplate}
+                    onChange={e => setSaveAsTemplate(e.target.checked)}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  💾 同时保存为风格模板（可复用到其他爆文）
+                </label>
+                {saveAsTemplate && (
+                  <input
+                    type="text"
+                    value={templateName}
+                    onChange={e => setTemplateName(e.target.value)}
+                    placeholder="输入模板名称，如：种草测评风格、情绪共鸣体..."
+                    style={{
+                      marginTop: 8, width: '100%', padding: '6px 10px',
+                      borderRadius: 6, border: '1px solid #b39ddb', fontSize: 13,
+                      outline: 'none'
+                    }}
+                  />
+                )}
+              </div>
+              <div className="btn-row" style={{ marginTop: 12 }}>
+                <button className="btn-primary" onClick={handleConfirmAnalysis}
+                  disabled={saveAsTemplate && !templateName.trim()}>
+                  {saveAsTemplate ? '确认添加 + 保存模板' : '确认添加（含分析结果）'}
+                </button>
+                <button className="btn-secondary" onClick={() => setAnalysisPreview(null)}>
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 分析错误提示 */}
+          {analysisError && (
+            <div style={{
+              background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: 8,
+              padding: '8px 12px', marginBottom: 10, fontSize: 12, color: '#c62828'
+            }}>
+              {analysisError}
+            </div>
+          )}
+
+          {/* 已保存的风格模板 */}
+          {(() => {
+            const currentProduct = products.find(p => p.id === refEditing)
+            const templates = currentProduct?.styleTemplates || []
+            if (templates.length === 0) return null
+            const enabledCount = templates.filter(t => t.enabled !== false).length
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <button
+                  onClick={() => setShowTemplateList(!showTemplateList)}
+                  style={{
+                    padding: '6px 14px', borderRadius: 8, border: '1px solid #b39ddb',
+                    background: showTemplateList ? '#ede7f6' : '#f3e5f5', color: '#7b1fa2',
+                    cursor: 'pointer', fontWeight: 600, fontSize: 13, marginBottom: 8
+                  }}
+                >
+                  {showTemplateList ? '收起模板列表' : `💾 风格模板 (${enabledCount}/${templates.length} 启用)`}
+                </button>
+                {showTemplateList && (
+                  <div style={{
+                    background: '#faf5ff', border: '1px solid #d1c4e9', borderRadius: 10,
+                    padding: 12
+                  }}>
+                    <p style={{ margin: '0 0 8px', fontSize: 12, color: '#7b1fa2' }}>
+                      启用的模板在批量生成时生效，AI 会按照模板的分析结果来仿写笔记。同时启用多个模板时 AI 会综合参考。
+                    </p>
+                    {templates.map(t => {
+                      const isEnabled = t.enabled !== false
+                      return (
+                        <div key={t.id} style={{
+                          background: isEnabled ? '#fff' : '#f5f5f5',
+                          border: `1px solid ${isEnabled ? '#e1bee7' : '#e0e0e0'}`,
+                          borderRadius: 8, padding: '8px 12px', marginBottom: 6,
+                          opacity: isEnabled ? 1 : 0.65,
+                          transition: 'all 0.2s'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={() => handleToggleTemplate(refEditing, t.id)}
+                                style={{ width: 16, height: 16, accentColor: '#7b1fa2' }}
+                              />
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: isEnabled ? '#6a1b9a' : '#999' }}>
+                                  {t.name}
+                                </div>
+                                <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
+                                  来源: {t.sourceText?.slice(0, 50)}{(t.sourceText?.length || 0) > 50 ? '...' : ''}
+                                </div>
+                              </div>
+                            </label>
+                            <button
+                              className="btn-sm btn-danger"
+                              style={{ flexShrink: 0, marginLeft: 8 }}
+                              onClick={() => handleDeleteTemplate(refEditing, t.id)}
+                            >删除</button>
+                          </div>
+                          <details style={{ marginTop: 6 }}>
+                            <summary style={{ fontSize: 11, color: '#9575cd', cursor: 'pointer' }}>查看分析内容</summary>
+                            <div style={{
+                              fontSize: 11, color: '#555', lineHeight: 1.7, marginTop: 4,
+                              maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-line',
+                              background: '#f9f5ff', borderRadius: 6, padding: 8
+                            }}>
+                              {t.analysis}
+                            </div>
+                          </details>
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
+                )}
               </div>
             )
           })()}
@@ -221,31 +428,32 @@ export default function ProductManager({ shop, onUpdateShop }) {
           {/* 添加新爆文 */}
           <div style={{ marginBottom: 10 }}>
             <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 6 }}>添加参考爆文</label>
-            <input
-              value={refForm.title}
-              onChange={e => setRefForm(p => ({ ...p, title: e.target.value }))}
-              placeholder="爆文标题"
-              style={{ width: '100%', marginBottom: 8, padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 13 }}
-            />
             <textarea
-              value={refForm.content}
-              onChange={e => setRefForm(p => ({ ...p, content: e.target.value }))}
-              placeholder="粘贴爆文正文内容..."
-              rows={6}
-              style={{ width: '100%', marginBottom: 8, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.6 }}
-            />
-            <input
-              value={refForm.tags}
-              onChange={e => setRefForm(p => ({ ...p, tags: e.target.value }))}
-              placeholder="标签（可选），例如：#考研 #上岸 #复试"
-              style={{ width: '100%', marginBottom: 10, padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 13 }}
+              value={refForm.text}
+              onChange={e => setRefForm({ text: e.target.value })}
+              placeholder="直接粘贴爆文内容（标题+正文+标签均可）..."
+              rows={8}
+              style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.6 }}
+              disabled={analyzing}
             />
           </div>
 
           <div className="btn-row">
             <button className="btn-primary" onClick={handleAddRef}
-              disabled={!refForm.title.trim() && !refForm.content.trim()}>
-              添加此爆文
+              disabled={!refForm.text.trim() || analyzing}>
+              直接添加
+            </button>
+            <button
+              onClick={handleAnalyzeAndAdd}
+              disabled={!refForm.text.trim() || analyzing}
+              style={{
+                padding: '8px 16px', borderRadius: 8, border: '1px solid #ce93d8',
+                background: analyzing ? '#f3e5f5' : '#7b1fa2', color: analyzing ? '#7b1fa2' : '#fff',
+                cursor: (!refForm.text.trim() || analyzing) ? 'not-allowed' : 'pointer',
+                fontWeight: 600, fontSize: 13
+              }}
+            >
+              {analyzing ? '🔄 AI 分析中...' : '🔍 AI 分析后添加'}
             </button>
             <button className="btn-secondary" onClick={() => setRefEditing(null)}>完成</button>
           </div>
@@ -262,7 +470,7 @@ export default function ProductManager({ shop, onUpdateShop }) {
             ✏️ 自定义提示词 — {products.find(p => p.id === promptEditing)?.name}
           </h3>
           <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            留空则使用默认提示词。提示词中的 <code>{'{变量}'}</code> 会在生成时自动替换为"补充信息"中的内容，无需手动填写。
+            留空则使用默认提示词。提示词中的 <code>{'{变量}'}</code> 会在生成时自动替换。
           </p>
 
           <div style={{ marginBottom: 14 }}>
@@ -288,20 +496,177 @@ export default function ProductManager({ shop, onUpdateShop }) {
         </div>
       )}
 
+      {/* 封面自定义编辑面板 */}
+      {coverEditing && (
+        <div style={{
+          background: '#f0f7ff', border: '1px solid #90caf9', borderRadius: 12,
+          padding: 20, marginBottom: 16
+        }}>
+          <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
+            🎨 自定义封面 — {products.find(p => p.id === coverEditing)?.name}
+          </h3>
+          <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
+            填写后批量生成时将使用你的自定义内容作为封面，不再由 AI 生成。留空则仍由 AI 自动生成。
+          </p>
+
+          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+            {/* 左侧表单 */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
+                  封面主标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议8-18字，按回车可手动控制换行位置）</span>
+                </label>
+                <textarea
+                  value={coverForm.coverTitle}
+                  onChange={e => setCoverForm(prev => ({ ...prev, coverTitle: e.target.value }))}
+                  placeholder={"如：逼自己做自媒体的\n第一天建议收藏\n\n按回车键换行，精确控制每行显示内容"}
+                  maxLength={50}
+                  rows={3}
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8,
+                    border: '1px solid #90caf9', fontSize: 13, outline: 'none',
+                    resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5
+                  }}
+                />
+                <div style={{ fontSize: 11, color: '#888', marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>
+                    {coverForm.coverTitle.replace(/\n/g, '').length}字（不含换行）
+                    {coverForm.coverTitle.includes('\n') && <span style={{ color: '#1565c0', marginLeft: 6 }}>已手动分{coverForm.coverTitle.split('\n').filter(Boolean).length}行</span>}
+                  </span>
+                  <span style={{ color: '#aaa' }}>回车=换行 · 不换行则自动排版</span>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
+                  封面副标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议15字以内，封面补充说明）</span>
+                </label>
+                <input
+                  type="text"
+                  value={coverForm.coverSubtitle}
+                  onChange={e => setCoverForm(prev => ({ ...prev, coverSubtitle: e.target.value }))}
+                  placeholder="如：万能模板+高分框架"
+                  maxLength={25}
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8,
+                    border: '1px solid #90caf9', fontSize: 13, outline: 'none'
+                  }}
+                />
+                <div style={{ fontSize: 11, color: coverForm.coverSubtitle.length > 15 ? '#e53935' : '#888', marginTop: 2 }}>
+                  {coverForm.coverSubtitle.length}/25字
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
+                  指定封面模板 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（可选，不选则按批量生成设置轮询）</span>
+                </label>
+                <select
+                  value={coverForm.coverTemplateId}
+                  onChange={e => {
+                    setCoverForm(prev => ({ ...prev, coverTemplateId: e.target.value }))
+                    if (e.target.value) setCoverPreviewTplId(e.target.value)
+                  }}
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8,
+                    border: '1px solid #90caf9', fontSize: 13
+                  }}
+                >
+                  <option value="">不指定（按批量生成设置）</option>
+                  {COVER_TEMPLATES.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} — {t.desc}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 预览模板切换（仅在未指定模板时显示） */}
+              {!coverForm.coverTemplateId && coverForm.coverTitle && (
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>切换预览模板：</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {COVER_TEMPLATES.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setCoverPreviewTplId(t.id)}
+                        style={{
+                          padding: '2px 8px', borderRadius: 4, border: '1px solid #ccc',
+                          background: coverPreviewTplId === t.id ? '#1565c0' : '#fff',
+                          color: coverPreviewTplId === t.id ? '#fff' : '#555',
+                          cursor: 'pointer', fontSize: 11
+                        }}
+                      >{t.name}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="btn-row" style={{ marginTop: 16 }}>
+                <button className="btn-primary" onClick={handleSaveCover}
+                  disabled={!coverForm.coverTitle.trim() && !coverForm.coverSubtitle.trim() && !coverForm.coverTemplateId}>
+                  保存封面设置
+                </button>
+                {(products.find(p => p.id === coverEditing)?.customCoverTitle ||
+                  products.find(p => p.id === coverEditing)?.customCoverSubtitle ||
+                  products.find(p => p.id === coverEditing)?.customCoverTemplateId) && (
+                  <button className="btn-danger" onClick={handleClearCover}>
+                    清除自定义（恢复AI生成）
+                  </button>
+                )}
+                <button className="btn-secondary" onClick={() => setCoverEditing(null)}>取消</button>
+              </div>
+            </div>
+
+            {/* 右侧实时预览 */}
+            {coverForm.coverTitle && (
+              <div style={{
+                flexShrink: 0, width: 180, textAlign: 'center'
+              }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>实时预览</div>
+                <CoverCanvas
+                  templateId={coverForm.coverTemplateId || coverPreviewTplId}
+                  data={{
+                    title: coverForm.coverTitle,
+                    subtitle: coverForm.coverSubtitle
+                  }}
+                  colorIdx={0}
+                  width={170}
+                />
+                <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+                  {COVER_TEMPLATES.find(t => t.id === (coverForm.coverTemplateId || coverPreviewTplId))?.name}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {products.length > 0 && (
         <div className="item-list">
           {products.map(p => {
             const refCount = (p.references || []).length
+            const hasAnalysis = (p.references || []).some(r => r.analysis)
+            const templateCount = (p.styleTemplates || []).length
+            const enabledTemplateCount = (p.styleTemplates || []).filter(t => t.enabled !== false).length
+            const hasCover = p.customCoverTitle || p.customCoverSubtitle
             return (
               <div key={p.id} className="item-card">
                 <div className="item-info">
                   <strong>{p.name}</strong>
                   <span className="item-meta">
                     {p.productId && <span className="product-id">ID: {p.productId}</span>}
-                    {p.audience || '未设置人群'}
-                    {p.sellingPoints && <span style={{ marginLeft: 6, color: '#888' }}>· {p.sellingPoints}</span>}
                     {refCount > 0 && (
-                      <span style={{ marginLeft: 6, color: '#e65100', fontWeight: 600 }}>🔥 {refCount}篇爆文参考</span>
+                      <span style={{ marginLeft: 6, color: '#e65100', fontWeight: 600 }}>
+                        🔥 {refCount}篇爆文参考
+                        {hasAnalysis && <span style={{ color: '#7b1fa2' }}> (含AI分析)</span>}
+                      </span>
+                    )}
+                    {templateCount > 0 && (
+                      <span style={{ marginLeft: 6, color: '#6a1b9a', fontWeight: 600 }}>
+                        💾 {enabledTemplateCount}/{templateCount}个模板启用
+                      </span>
+                    )}
+                    {hasCover && (
+                      <span style={{ marginLeft: 6, color: '#1565c0', fontWeight: 600 }}>🎨 已定制封面</span>
                     )}
                     {(p.customSystemPrompt || p.customUserPrompt) && (
                       <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>📝 已定制提示词</span>
@@ -309,10 +674,13 @@ export default function ProductManager({ shop, onUpdateShop }) {
                   </span>
                 </div>
                 <div className="item-actions">
-                  <button className="btn-sm" onClick={() => handleEdit(p)}>补充信息</button>
                   <button className="btn-sm" onClick={() => handleOpenRef(p)}
                     style={{ background: refCount > 0 ? '#fff3e0' : undefined }}>
                     {refCount > 0 ? `爆文参考(${refCount})` : '爆文参考'}
+                  </button>
+                  <button className="btn-sm" onClick={() => handleEditCover(p)}
+                    style={{ background: hasCover ? '#e3f2fd' : undefined }}>
+                    {hasCover ? '编辑封面' : '自定义封面'}
                   </button>
                   <button className="btn-sm" onClick={() => handleEditPrompt(p)}
                     style={{ background: (p.customSystemPrompt || p.customUserPrompt) ? '#fff3e0' : undefined }}>
