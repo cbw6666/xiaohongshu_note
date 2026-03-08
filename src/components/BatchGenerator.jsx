@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitlePrompt } from '../services/aiService.js'
 
-export default function BatchGenerator({ settings, shops, onGenerated }) {
+export default function BatchGenerator({ settings, shops, onGenerated, innerImagesMap }) {
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0, text: '' })
   const [selectedShops, setSelectedShops] = useState([])
@@ -129,7 +129,7 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
             const itemId = product.productId || ((product.name || '').match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9]+)/i) || [])[1] || ''
 
             try {
-              const messages = buildNotePrompt(product)
+              const messages = buildNotePrompt(product, { noteIndex: i })
               const raw = await callAI(settings, messages)
               const parsed = parseNoteResponse(raw)
 
@@ -167,6 +167,7 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
                 tags: parsed.tags || '',
                 coverTitle: product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8),
                 coverSubtitle: product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || '',
+                innerImages: innerImagesMap?.[product.id] || [],
                 raw,
                 createdAt: new Date().toISOString(),
               })
@@ -187,6 +188,7 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
                 tags: '',
                 coverTitle: product.customCoverTitle || cleanName.slice(0, 8),
                 coverSubtitle: product.customCoverSubtitle || '',
+                innerImages: innerImagesMap?.[product.id] || [],
                 raw: '',
                 error: true,
                 createdAt: new Date().toISOString(),
@@ -371,6 +373,69 @@ export default function BatchGenerator({ settings, shops, onGenerated }) {
           ))}
         </div>
       </div>
+
+      {/* 多样性 Tips */}
+      {selectedShops.length > 0 && totalNotes > 0 && (
+        <div style={{
+          margin: '16px 0', padding: '14px 16px',
+          background: '#fffbeb', borderRadius: 10,
+          border: '1px solid #fde68a', fontSize: 13, lineHeight: 1.8
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: '#b45309' }}>
+            💡 内容多样性说明
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: '#78350f' }}>
+            <li>系统内置 <strong>10种笔记类型 × 15种写法风格</strong>，批量生成时自动轮换，<strong>150篇内</strong>每篇写法组合不重复</li>
+            <li>上传爆文参考 + 生成风格模板可进一步提升多样性，建议每商品 <strong>≥3篇</strong> 爆文效果最佳</li>
+            <li>生成后建议 <strong>人工润色</strong> 每篇文案，加入个人口癖和表达习惯，降低 AI 痕迹</li>
+            <li>发布时每个账号 <strong>间隔3小时以上</strong>，避免短时间密集发布被判定为机器行为</li>
+          </ul>
+          {/* 动态警告：检测爆文/模板不足的商品 */}
+          {(() => {
+            const warnings = []
+            selectedShops.forEach(shopId => {
+              const shop = shops.find(s => s.id === shopId)
+              if (!shop) return
+              shop.products.forEach(p => {
+                const cfg = productConfig[p.id]
+                if (!cfg?.selected) return
+                const refCount = (p.references || []).length
+                const enabledTplCount = (p.styleTemplates || []).filter(t => t.enabled !== false).length
+                const noteCount = cfg.count || 3
+                if (refCount === 0 && enabledTplCount === 0 && noteCount > 1) {
+                  warnings.push({ name: p.name, type: 'none', noteCount })
+                } else if (refCount < 3 && enabledTplCount < 3 && noteCount > 3) {
+                  warnings.push({ name: p.name, refCount, enabledTplCount, noteCount, type: 'low' })
+                } else if (noteCount > refCount * 2 && refCount > 0) {
+                  warnings.push({ name: p.name, refCount, noteCount, type: 'ratio' })
+                }
+              })
+            })
+            if (warnings.length === 0) return null
+            return (
+              <div style={{
+                marginTop: 10, padding: '8px 12px',
+                background: '#fff3e0', borderRadius: 8,
+                border: '1px solid #ffcc80', fontSize: 12, color: '#e65100'
+              }}>
+                {warnings.map((w, i) => (
+                  <div key={i} style={{ marginBottom: i < warnings.length - 1 ? 4 : 0 }}>
+                    {w.type === 'none' && (
+                      <>💡 「{w.name.slice(0, 15)}」没有爆文和模板，系统将使用内置写法轮换保证差异性，添加爆文可进一步提升质量</>
+                    )}
+                    {w.type === 'low' && (
+                      <>💡 「{w.name.slice(0, 15)}」仅有 {w.refCount} 篇爆文 + {w.enabledTplCount} 个模板，建议补充至≥3个以获得更好的多样性</>
+                    )}
+                    {w.type === 'ratio' && (
+                      <>💡 「{w.name.slice(0, 15)}」{w.refCount} 篇爆文生成 {w.noteCount} 篇，部分笔记的爆文参考素材将重复，但写法风格仍会差异化</>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+        </div>
+      )}
 
       {/* 生成信息 */}
       <div className="gen-info">

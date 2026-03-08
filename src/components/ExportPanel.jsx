@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { exportExcel } from '../utils/exportUtils.js'
 
-export default function ExportPanel({ notes }) {
+export default function ExportPanel({ notes, innerImagesMap }) {
   const [exporting, setExporting] = useState(false)
   const [progress, setProgress] = useState(null)
 
@@ -10,7 +10,7 @@ export default function ExportPanel({ notes }) {
     setExporting(true)
     setProgress({ current: 0, total: notes.length })
     try {
-      await exportExcel(notes, setProgress)
+      await exportExcel(notes, setProgress, innerImagesMap)
     } catch (err) {
       alert('导出失败: ' + err.message)
     }

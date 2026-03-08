@@ -32,12 +32,24 @@ function extractProductId(name, existingId) {
   return match ? match[1] : ''
 }
 
-export async function exportExcel(notes, onProgress) {
+export async function exportExcel(notes, onProgress, innerImagesMap) {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('笔记')
 
-  // 表头：按截图字段排列
+  // 计算最大内页图数量（优先从笔记中取，其次从 innerImagesMap 中取）
+  let maxInnerCount = 0
+  for (const n of notes) {
+    const fromNote = (n.innerImages || []).length
+    const fromMap = (innerImagesMap?.[n.productId] || []).length
+    const count = Math.max(fromNote, fromMap)
+    if (count > maxInnerCount) maxInnerCount = count
+  }
+
+  // 表头：按截图字段排列 + 动态内页图列
   const headers = ['店铺', '账号', '商品名称', '商品ID', '笔记标题', '正文', '标签', '笔记封面']
+  for (let i = 1; i <= maxInnerCount; i++) {
+    headers.push(`内页图${i}`)
+  }
   const headerRow = sheet.addRow(headers)
 
   // 表头样式
@@ -52,7 +64,7 @@ export async function exportExcel(notes, onProgress) {
   })
 
   // 设置列宽
-  sheet.columns = [
+  const columns = [
     { width: 14 },  // 店铺
     { width: 14 },  // 账号
     { width: 20 },  // 商品名称
@@ -62,8 +74,12 @@ export async function exportExcel(notes, onProgress) {
     { width: 24 },  // 标签
     { width: 22 },  // 笔记封面
   ]
+  for (let i = 0; i < maxInnerCount; i++) {
+    columns.push({ width: 22 }) // 内页图列
+  }
+  sheet.columns = columns
 
-  // 封面图目标尺寸（像素），用于单元格内显示
+  // 封面图/内页图目标尺寸（像素），用于单元格内显示
   const coverW = 140
   const coverH = 187
 
@@ -74,16 +90,27 @@ export async function exportExcel(notes, onProgress) {
       onProgress({ current: i + 1, total: notes.length })
     }
 
-    const row = sheet.addRow([
+    // 获取该笔记的内页图（优先笔记自带，其次从 map 中取）
+    const innerImages = (n.innerImages && n.innerImages.length > 0)
+      ? n.innerImages
+      : (innerImagesMap?.[n.productId] || [])
+
+    const rowData = [
       n.shopName,
       n.accountName,
       cleanProductName(n.productName),
       extractProductId(n.productName, n.productItemId),
       n.title,
       n.content,
-      (n.tags || '').split(/\s+/).filter(Boolean).join(','),
+      (n.tags || '').split(/\s+/).filter(Boolean).slice(0, 10).join(','),
       '', // 封面图占位
-    ])
+    ]
+    // 内页图占位
+    for (let j = 0; j < maxInnerCount; j++) {
+      rowData.push('')
+    }
+
+    const row = sheet.addRow(rowData)
 
     // 设置行高以容纳封面图
     row.height = coverH * 0.75  // Excel 行高单位约为像素的 0.75
@@ -91,7 +118,8 @@ export async function exportExcel(notes, onProgress) {
     // 正文列自动换行
     row.getCell(6).alignment = { wrapText: true, vertical: 'top' }
     // 其他列垂直居中
-    for (let c = 1; c <= 8; c++) {
+    const totalCols = 8 + maxInnerCount
+    for (let c = 1; c <= totalCols; c++) {
       if (c !== 6) {
         row.getCell(c).alignment = { vertical: 'middle', wrapText: true }
       }
@@ -118,6 +146,38 @@ export async function exportExcel(notes, onProgress) {
     } catch (err) {
       console.warn(`封面图渲染失败(第${i + 1}条):`, err)
       row.getCell(8).value = '[封面生成失败]'
+    }
+
+    // 嵌入内页图
+    for (let j = 0; j < innerImages.length; j++) {
+      try {
+        const imgData = innerImages[j]
+        // 内页图是 data URL (base64)，需要提取纯 base64 部分
+        const pureBase64 = imgData.includes(',') ? imgData.split(',')[1] : imgData
+        // 判断图片格式
+        let extension = 'png'
+        if (imgData.startsWith('data:image/jpeg') || imgData.startsWith('data:image/jpg')) {
+          extension = 'jpeg'
+        } else if (imgData.startsWith('data:image/gif')) {
+          extension = 'gif'
+        } else if (imgData.startsWith('data:image/webp')) {
+          extension = 'png' // ExcelJS 不支持 webp，用 png 兜底
+        }
+
+        const innerImageId = workbook.addImage({
+          base64: pureBase64,
+          extension,
+        })
+
+        // 内页图列从第9列开始（索引8），依次 8, 9, 10...
+        sheet.addImage(innerImageId, {
+          tl: { col: 8 + j, row: i + 1 },
+          ext: { width: coverW, height: coverH },
+        })
+      } catch (err) {
+        console.warn(`内页图${j + 1}嵌入失败(第${i + 1}条):`, err)
+        row.getCell(9 + j).value = '[内页图嵌入失败]'
+      }
     }
   }
 

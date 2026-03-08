@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, callAI, buildAnalysisPrompt } from '../services/aiService.js'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import CoverCanvas from './CoverCanvas.jsx'
 
-export default function ProductManager({ shop, onUpdateShop, settings }) {
+export default function ProductManager({ shop, onUpdateShop, settings, innerImagesMap, setInnerImagesMap }) {
   const [promptEditing, setPromptEditing] = useState(null)
   const [promptForm, setPromptForm] = useState({ customSystemPrompt: '', customUserPrompt: '' })
   // 爆文参考
@@ -21,6 +21,12 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
   const [coverEditing, setCoverEditing] = useState(null)
   const [coverForm, setCoverForm] = useState({ coverTitle: '', coverSubtitle: '', coverTemplateId: '' })
   const [coverPreviewTplId, setCoverPreviewTplId] = useState(COVER_TEMPLATES[0]?.id || '')
+  // 内页图上传
+  const innerImageInputRef = useRef(null)
+  const [innerImageTarget, setInnerImageTarget] = useState(null) // 当前正在上传内页图的商品ID
+  // 内页图拖拽排序
+  const [dragIndex, setDragIndex] = useState(null)
+  const [dragProductId, setDragProductId] = useState(null)
 
   if (!shop) return <div className="panel"><p className="empty-state">请先在左侧选择一个店铺</p></div>
 
@@ -223,8 +229,93 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
     setCoverEditing(null)
   }
 
+  // 内页图处理
+  const handleInnerImageUpload = (productId) => {
+    setInnerImageTarget(productId)
+    innerImageInputRef.current?.click()
+  }
+
+  const handleInnerImageChange = (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0 || !innerImageTarget) return
+
+    const readers = files.map(file => {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result)
+        reader.readAsDataURL(file)
+      })
+    })
+
+    Promise.all(readers).then(base64List => {
+      setInnerImagesMap(prev => ({
+        ...prev,
+        [innerImageTarget]: [...(prev[innerImageTarget] || []), ...base64List]
+      }))
+      setInnerImageTarget(null)
+    })
+
+    // 重置 input 以允许重复上传同一文件
+    e.target.value = ''
+  }
+
+  const handleDeleteInnerImage = (productId, index) => {
+    setInnerImagesMap(prev => ({
+      ...prev,
+      [productId]: (prev[productId] || []).filter((_, i) => i !== index)
+    }))
+  }
+
+  const handleClearInnerImages = (productId) => {
+    setInnerImagesMap(prev => {
+      const next = { ...prev }
+      delete next[productId]
+      return next
+    })
+  }
+
+  // 内页图拖拽排序
+  const handleInnerImageDragStart = (e, productId, idx) => {
+    setDragIndex(idx)
+    setDragProductId(productId)
+    e.dataTransfer.effectAllowed = 'move'
+    e.currentTarget.style.opacity = '0.4'
+  }
+
+  const handleInnerImageDragEnd = (e) => {
+    e.currentTarget.style.opacity = '1'
+    setDragIndex(null)
+    setDragProductId(null)
+  }
+
+  const handleInnerImageDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleInnerImageDrop = (productId, dropIdx) => {
+    if (dragIndex === null || dragProductId !== productId || dragIndex === dropIdx) return
+    setInnerImagesMap(prev => {
+      const imgs = [...(prev[productId] || [])]
+      const [moved] = imgs.splice(dragIndex, 1)
+      imgs.splice(dropIdx, 0, moved)
+      return { ...prev, [productId]: imgs }
+    })
+    setDragIndex(null)
+    setDragProductId(null)
+  }
+
   return (
     <div className="panel">
+      {/* 隐藏的内页图文件上传 input */}
+      <input
+        ref={innerImageInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleInnerImageChange}
+      />
       <h2>📦 商品管理 <span className="panel-sub">— {shop.name}</span></h2>
       <p className="hint" style={{ marginBottom: 12 }}>商品从千帆导入，可添加爆文参考（支持 AI 分析爆款因子）、定制提示词</p>
 
@@ -371,7 +462,7 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
                     padding: 12
                   }}>
                     <p style={{ margin: '0 0 8px', fontSize: 12, color: '#7b1fa2' }}>
-                      启用的模板在批量生成时生效，AI 会按照模板的分析结果来仿写笔记。同时启用多个模板时 AI 会综合参考。
+                      启用的模板在批量生成时会自动轮换使用——每篇笔记仅参考 1 个模板，确保多样性。建议启用 ≥3 个模板效果最佳。
                     </p>
                     {templates.map(t => {
                       const isEnabled = t.enabled !== false
@@ -648,6 +739,7 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
             const templateCount = (p.styleTemplates || []).length
             const enabledTemplateCount = (p.styleTemplates || []).filter(t => t.enabled !== false).length
             const hasCover = p.customCoverTitle || p.customCoverSubtitle
+            const innerImages = innerImagesMap[p.id] || []
             return (
               <div key={p.id} className="item-card">
                 <div className="item-info">
@@ -658,6 +750,12 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
                       <span style={{ marginLeft: 6, color: '#e65100', fontWeight: 600 }}>
                         🔥 {refCount}篇爆文参考
                         {hasAnalysis && <span style={{ color: '#7b1fa2' }}> (含AI分析)</span>}
+                        {refCount < 3 && <span style={{ color: '#f57c00', fontWeight: 400, fontSize: 11 }}> (建议≥3篇)</span>}
+                      </span>
+                    )}
+                    {refCount === 0 && (
+                      <span style={{ marginLeft: 6, color: '#bbb', fontSize: 11 }}>
+                        建议添加≥3篇爆文参考以提高生成多样性
                       </span>
                     )}
                     {templateCount > 0 && (
@@ -671,9 +769,16 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
                     {(p.customSystemPrompt || p.customUserPrompt) && (
                       <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>📝 已定制提示词</span>
                     )}
+                    {innerImages.length > 0 && (
+                      <span style={{ marginLeft: 6, color: '#00897b', fontWeight: 600 }}>🖼️ {innerImages.length}张内页图</span>
+                    )}
                   </span>
                 </div>
                 <div className="item-actions">
+                  <button className="btn-sm" onClick={() => handleInnerImageUpload(p.id)}
+                    style={{ background: innerImages.length > 0 ? '#e0f2f1' : undefined }}>
+                    {innerImages.length > 0 ? `内页图(${innerImages.length})` : '添加内页图'}
+                  </button>
                   <button className="btn-sm" onClick={() => handleOpenRef(p)}
                     style={{ background: refCount > 0 ? '#fff3e0' : undefined }}>
                     {refCount > 0 ? `爆文参考(${refCount})` : '爆文参考'}
@@ -688,6 +793,77 @@ export default function ProductManager({ shop, onUpdateShop, settings }) {
                   </button>
                   <button className="btn-sm btn-danger" onClick={() => handleDelete(p.id)}>删除</button>
                 </div>
+                {/* 内页图预览 */}
+                {innerImages.length > 0 && (
+                  <div style={{
+                    marginTop: 10, padding: '10px 12px', background: '#f0faf8',
+                    borderRadius: 8, border: '1px solid #b2dfdb'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#00897b' }}>
+                        🖼️ 内页图 ({innerImages.length}张) — 拖拽可调整顺序，刷新页面后需重新上传
+                      </span>
+                      <button
+                        className="btn-sm btn-danger"
+                        style={{ fontSize: 11, padding: '2px 8px' }}
+                        onClick={() => handleClearInnerImages(p.id)}
+                      >清空全部</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {innerImages.map((img, idx) => (
+                        <div
+                          key={idx}
+                          draggable
+                          onDragStart={(e) => handleInnerImageDragStart(e, p.id, idx)}
+                          onDragEnd={handleInnerImageDragEnd}
+                          onDragOver={handleInnerImageDragOver}
+                          onDrop={() => handleInnerImageDrop(p.id, idx)}
+                          style={{
+                            position: 'relative', display: 'inline-block',
+                            cursor: 'grab',
+                            border: (dragIndex === idx && dragProductId === p.id) ? '2px solid #00897b' : '2px solid transparent',
+                            borderRadius: 8, padding: 1,
+                            transition: 'border-color 0.2s',
+                          }}
+                        >
+                          <img
+                            src={img}
+                            alt={`内页图${idx + 1}`}
+                            style={{
+                              width: 80, height: 80, objectFit: 'cover',
+                              borderRadius: 6, border: '1px solid #ccc',
+                              pointerEvents: 'none',
+                            }}
+                          />
+                          <span style={{
+                            position: 'absolute', bottom: 2, left: 2,
+                            background: 'rgba(0,0,0,0.55)', color: '#fff',
+                            fontSize: 10, padding: '1px 5px', borderRadius: 4,
+                          }}>{idx + 1}</span>
+                          <button
+                            onClick={() => handleDeleteInnerImage(p.id, idx)}
+                            style={{
+                              position: 'absolute', top: -6, right: -6,
+                              width: 20, height: 20, borderRadius: '50%',
+                              background: '#e53935', color: '#fff', border: 'none',
+                              cursor: 'pointer', fontSize: 12, lineHeight: '18px',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            }}
+                          >×</button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => handleInnerImageUpload(p.id)}
+                        style={{
+                          width: 80, height: 80, borderRadius: 6,
+                          border: '2px dashed #b2dfdb', background: '#e0f2f1',
+                          cursor: 'pointer', fontSize: 24, color: '#00897b',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                      >+</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

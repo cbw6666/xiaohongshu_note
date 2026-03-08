@@ -22,6 +22,8 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings)
   const [shops, setShops] = useState(loadShops)
   const [generated, setGenerated] = useState(loadGenerated)
+  const [innerImagesMap, setInnerImagesMap] = useState({}) // { [productId]: [base64...] }
+  const [storageWarning, setStorageWarning] = useState(null)
   const [activeShopId, setActiveShopId] = useState(() => {
     const s = loadShops()
     return s.length > 0 ? s[0].id : ''
@@ -29,7 +31,22 @@ export default function App() {
 
   useEffect(() => { saveSettings(settings) }, [settings])
   useEffect(() => { saveShops(shops) }, [shops])
-  useEffect(() => { saveGenerated(generated) }, [generated])
+  useEffect(() => {
+    const result = saveGenerated(generated)
+    if (result.status === 'trimmed') {
+      setStorageWarning({
+        message: `存储空间不足，仅保留了最新 ${result.kept} 条笔记（共 ${result.total} 条）。`,
+        advice: '建议先导出 Excel 再清空历史笔记，然后重新生成。',
+      })
+    } else if (result.status === 'cleared' || result.status === 'error') {
+      setStorageWarning({
+        message: '存储空间严重不足，缓存已被清空。',
+        advice: '请清理浏览器存储后重新生成。',
+      })
+    } else if (storageWarning) {
+      setStorageWarning(null)
+    }
+  }, [generated])
 
   const activeShop = shops.find(s => s.id === activeShopId) || null
 
@@ -98,6 +115,37 @@ export default function App() {
         </div>
       )}
 
+      {/* 存储空间不足警告 */}
+      {storageWarning && (
+        <div style={{
+          margin: '0 20px', padding: '12px 18px',
+          background: '#fff3e0', border: '1px solid #ffb74d', borderRadius: 10,
+          display: 'flex', alignItems: 'center', gap: 12,
+          fontSize: 13, color: '#e65100',
+        }}>
+          <span style={{ flex: 1 }}>
+            ⚠️ <strong>{storageWarning.message}</strong>{' '}{storageWarning.advice}
+          </span>
+          <button
+            onClick={() => { setActiveTab('results'); setStorageWarning(null) }}
+            style={{
+              padding: '6px 14px', borderRadius: 6, border: 'none',
+              background: '#e65100', color: '#fff', cursor: 'pointer',
+              fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap',
+            }}
+          >
+            📋 前往清理
+          </button>
+          <button
+            onClick={() => setStorageWarning(null)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 16, color: '#999', padding: '0 4px',
+            }}
+          >✕</button>
+        </div>
+      )}
+
       <main className="main-content">
         {activeTab === 'settings' && (
           <Settings settings={settings} onSave={setSettings} />
@@ -115,7 +163,7 @@ export default function App() {
             </div>
             {activeShop && (
               <div className="shop-detail">
-                <ProductManager shop={activeShop} onUpdateShop={handleUpdateShop} settings={settings} />
+                <ProductManager shop={activeShop} onUpdateShop={handleUpdateShop} settings={settings} innerImagesMap={innerImagesMap} setInnerImagesMap={setInnerImagesMap} />
                 <AccountManager shop={activeShop} onUpdateShop={handleUpdateShop} />
               </div>
             )}
@@ -127,6 +175,7 @@ export default function App() {
             settings={settings}
             shops={shops}
             onGenerated={handleGenerated}
+            innerImagesMap={innerImagesMap}
           />
         )}
 
@@ -139,7 +188,7 @@ export default function App() {
             />
             {generated.length > 0 && (
               <>
-                <ExportPanel notes={generated} />
+                <ExportPanel notes={generated} innerImagesMap={innerImagesMap} />
                 <div className="panel">
                   <button className="btn-danger" onClick={handleClearAll}>🗑 清空全部笔记</button>
                 </div>

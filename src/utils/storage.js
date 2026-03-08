@@ -17,7 +17,11 @@ export function loadSettings() {
 }
 
 export function saveSettings(settings) {
-  localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings))
+  try {
+    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings))
+  } catch (e) {
+    console.warn('保存设置失败:', e.message)
+  }
 }
 
 export function loadShops() {
@@ -28,7 +32,11 @@ export function loadShops() {
 }
 
 export function saveShops(shops) {
-  localStorage.setItem(KEYS.SHOPS, JSON.stringify(shops))
+  try {
+    localStorage.setItem(KEYS.SHOPS, JSON.stringify(shops))
+  } catch (e) {
+    console.warn('保存店铺数据失败:', e.message)
+  }
 }
 
 export function loadGenerated() {
@@ -39,7 +47,33 @@ export function loadGenerated() {
 }
 
 export function saveGenerated(notes) {
-  localStorage.setItem(KEYS.GENERATED, JSON.stringify(notes))
+  // 先尝试直接保存
+  try {
+    localStorage.setItem(KEYS.GENERATED, JSON.stringify(notes))
+    return { status: 'ok' }
+  } catch {
+    // 配额不足，尝试截断保存
+  }
+
+  // 逐步减少数据量直到能存下
+  let trimmed = notes
+  while (trimmed.length > 0) {
+    trimmed = trimmed.slice(0, Math.max(1, Math.floor(trimmed.length * 0.8)))
+    try {
+      localStorage.setItem(KEYS.GENERATED, JSON.stringify(trimmed))
+      return { status: 'trimmed', kept: trimmed.length, total: notes.length }
+    } catch {
+      // 继续缩减
+    }
+  }
+
+  // 实在存不下，清空 generated 释放空间
+  try {
+    localStorage.removeItem(KEYS.GENERATED)
+    return { status: 'cleared', total: notes.length }
+  } catch {
+    return { status: 'error', total: notes.length }
+  }
 }
 
 export function loadStyleTemplates() {
@@ -50,5 +84,9 @@ export function loadStyleTemplates() {
 }
 
 export function saveStyleTemplates(templates) {
-  localStorage.setItem(KEYS.STYLE_TEMPLATES, JSON.stringify(templates))
+  try {
+    localStorage.setItem(KEYS.STYLE_TEMPLATES, JSON.stringify(templates))
+  } catch (e) {
+    console.warn('保存风格模板失败:', e.message)
+  }
 }
