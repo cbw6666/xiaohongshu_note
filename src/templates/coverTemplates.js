@@ -12,7 +12,7 @@ export const COVER_TEMPLATES = [
     name: '格子速报风',
     desc: '黄色格子底+速报标签+放射装饰',
     render: (ctx, w, h, data) => {
-      const F = FONTS.QINGKE
+      const F = FONTS.HEITI
       // 奶黄格子背景
       ctx.fillStyle = '#FFF8E1'
       ctx.fillRect(0, 0, w, h)
@@ -81,7 +81,7 @@ export const COVER_TEMPLATES = [
     name: '蓝色便签风',
     desc: '蓝色虚线边框+顶部线圈+彩色关键词',
     render: (ctx, w, h, data) => {
-      const F = FONTS.KUAILE
+      const F = FONTS.HEITI
       ctx.fillStyle = '#F0F7FC'
       ctx.fillRect(0, 0, w, h)
 
@@ -114,7 +114,7 @@ export const COVER_TEMPLATES = [
 
       // 主标题
       ctx.fillStyle = '#1A1A1A'
-      ctx.font = `400 100px ${F}`
+      ctx.font = `900 100px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, w - 280)
       const lh = 120
@@ -126,7 +126,7 @@ export const COVER_TEMPLATES = [
       if (data.subtitle) {
         const subY = startY + blockH + 40
         const subMaxW = w - 280
-        fitFontSize(ctx, data.subtitle, subMaxW, 62, 36, `400 62px ${F}`)
+        fitFontSize(ctx, data.subtitle, subMaxW, 62, 36, `900 62px ${F}`)
         // 彩色关键词
         const colors = ['#FF69B4', '#E8A040', '#7CB9E8']
         const chars = data.subtitle.split('')
@@ -216,8 +216,8 @@ export const COVER_TEMPLATES = [
     name: '黄框方格风',
     desc: '黄色粗边框+格子底+椭圆标注+蓝色副标题',
     render: (ctx, w, h, data) => {
-      const F = FONTS.MASHAN
-      const F2 = FONTS.KUAILE
+      const F = FONTS.HEITI
+      const F2 = FONTS.HEITI
       ctx.fillStyle = '#FFFFFF'
       ctx.fillRect(0, 0, w, h)
       ctx.strokeStyle = 'rgba(200,200,200,0.25)'
@@ -238,7 +238,7 @@ export const COVER_TEMPLATES = [
 
       // 主标题
       ctx.fillStyle = '#1A1A1A'
-      ctx.font = `400 115px ${F}`
+      ctx.font = `900 115px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, w - 260)
       const lh = 130
@@ -265,7 +265,7 @@ export const COVER_TEMPLATES = [
       if (data.subtitle) {
         const subY = startY + blockH + 35
         const subMaxW = w - 260
-        fitFontSize(ctx, data.subtitle, subMaxW, 56, 32, `400 56px ${F2}`)
+        fitFontSize(ctx, data.subtitle, subMaxW, 56, 32, `900 56px ${F2}`)
         const tw = ctx.measureText(data.subtitle).width
         const barW = Math.min(tw + 70, w - 240)
         ctx.fillStyle = '#7CB9E8'
@@ -433,7 +433,7 @@ export const COVER_TEMPLATES = [
     name: '橙色高亮讨论风',
     desc: '圆角白卡+顶部图标+黄色高亮+手绘书本',
     render: (ctx, w, h, data) => {
-      const F = FONTS.XIAOWEI
+      const F = FONTS.HEITI
       ctx.fillStyle = '#F5F5F5'
       ctx.fillRect(0, 0, w, h)
 
@@ -456,7 +456,7 @@ export const COVER_TEMPLATES = [
 
       // 主标题
       ctx.fillStyle = '#1A1A1A'
-      ctx.font = `400 105px ${F}`
+      ctx.font = `900 105px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, w - 240)
       const lh = 125
@@ -467,7 +467,7 @@ export const COVER_TEMPLATES = [
       // 副标题黄色高亮
       if (data.subtitle) {
         const subY = startY + blockH + 40
-        fitFontSize(ctx, data.subtitle, w - 260, 95, 50, `400 95px ${F}`)
+        fitFontSize(ctx, data.subtitle, w - 260, 95, 50, `900 95px ${F}`)
         const tw = ctx.measureText(data.subtitle).width
         const y = subY
         ctx.fillStyle = '#FFE44D'
@@ -487,7 +487,7 @@ export const COVER_TEMPLATES = [
     name: '格子圈重点风',
     desc: '浅格子底+黑色大字+绿色椭圆圈重点+橙色箭头',
     render: (ctx, w, h, data) => {
-      const F = FONTS.LONGCANG
+      const F = FONTS.HEITI
       ctx.fillStyle = '#FBFBFB'
       ctx.fillRect(0, 0, w, h)
       ctx.strokeStyle = 'rgba(200,200,200,0.28)'
@@ -511,7 +511,7 @@ export const COVER_TEMPLATES = [
 
       // 主标题
       ctx.fillStyle = '#1A1A1A'
-      ctx.font = `400 115px ${F}`
+      ctx.font = `900 115px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, w - 240)
       const lh = 130
@@ -535,7 +535,7 @@ export const COVER_TEMPLATES = [
 
       if (data.subtitle) {
         ctx.fillStyle = '#777'
-        fitFontSize(ctx, data.subtitle, w - 240, 56, 32, `400 56px ${F}`)
+        fitFontSize(ctx, data.subtitle, w - 240, 56, 32, `900 56px ${F}`)
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 40)
       }
     },
@@ -547,7 +547,7 @@ export const COVER_TEMPLATES = [
     name: '浏览器窗口风',
     desc: '格子底+浏览器外框+红绿黄圆点+绿色涂抹高亮',
     render: (ctx, w, h, data) => {
-      const F = FONTS.SONGTI
+      const F = FONTS.HEITI
       ctx.fillStyle = '#F5F5F5'
       ctx.fillRect(0, 0, w, h)
       ctx.strokeStyle = 'rgba(200,200,200,0.22)'
@@ -681,7 +681,7 @@ export const COVER_TEMPLATES = [
     name: '撕纸便利贴风',
     desc: '软木板底+粉色便利贴+胶带装饰+手写体',
     render: (ctx, w, h, data) => {
-      const F = FONTS.MASHAN
+      const F = FONTS.HEITI
 
       // 软木板纹理背景
       ctx.fillStyle = '#F5E6CA'
@@ -740,7 +740,7 @@ export const COVER_TEMPLATES = [
 
       // 主标题
       ctx.fillStyle = '#3A2A2A'
-      ctx.font = `400 108px ${F}`
+      ctx.font = `900 108px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, 820)
       const lh = 128
@@ -763,7 +763,7 @@ export const COVER_TEMPLATES = [
       if (data.subtitle) {
         const subY = divY + 70
         ctx.fillStyle = '#C06070'
-        fitFontSize(ctx, data.subtitle, 820, 62, 36, `400 62px ${F}`)
+        fitFontSize(ctx, data.subtitle, 820, 62, 36, `900 62px ${F}`)
         ctx.fillText(data.subtitle, 0, subY)
 
         // 粉色下划线
@@ -1248,14 +1248,14 @@ export const COVER_TEMPLATES = [
     name: '手写黄色高亮风',
     desc: '白底+手写体+黄色色块高亮+蓝色关键词',
     render: (ctx, w, h, data) => {
-      const F = FONTS.MASHAN
+      const F = FONTS.HEITI
       // 纯白背景
       ctx.fillStyle = '#FEFEFE'
       ctx.fillRect(0, 0, w, h)
 
       // 主标题 — 居中手写体
       ctx.fillStyle = '#1A1A1A'
-      ctx.font = `400 120px ${F}`
+      ctx.font = `900 120px ${F}`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lines = smartWrap(ctx, data.title, w - 200)
       const lh = 165
@@ -1292,7 +1292,7 @@ export const COVER_TEMPLATES = [
       // 副标题
       if (data.subtitle) {
         ctx.fillStyle = '#888'
-        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `400 56px ${F}`)
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `900 56px ${F}`)
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 50)
       }
     },
@@ -1355,189 +1355,6 @@ export const COVER_TEMPLATES = [
         ctx.textAlign = 'center'
         ctx.fillText(data.subtitle, w / 2, startY + blockH + 50)
       }
-    },
-  },
-
-  // ===== 19. 复古笔记夹风 — 手写潦草体 =====
-  {
-    id: 'vintage_clipboard',
-    name: '复古笔记夹风',
-    desc: '灰色皮革底+笔记夹+横线纸+手写体+钢笔装饰',
-    render: (ctx, w, h, data) => {
-      const F = FONTS.LONGCANG
-      // 灰色皮革纹理背景
-      ctx.fillStyle = '#8A8580'
-      ctx.fillRect(0, 0, w, h)
-      ctx.fillStyle = 'rgba(0,0,0,0.05)'
-      for (let i = 0; i < 500; i++) {
-        const px = Math.random() * w, py = Math.random() * h
-        ctx.fillRect(px, py, 1 + Math.random() * 3, 1 + Math.random() * 3)
-      }
-
-      // 笔记纸主体（带阴影）
-      const padX = 100, padY = 200, padW = w - 200, padH = h - 340
-      ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 10
-      ctx.fillStyle = '#FAF8F2'
-      roundRect(ctx, padX, padY, padW, padH, 6)
-      ctx.fill()
-      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0
-
-      // 横线
-      ctx.strokeStyle = 'rgba(180,175,165,0.35)'
-      ctx.lineWidth = 1.5
-      for (let y = padY + 80; y < padY + padH - 40; y += 56) {
-        ctx.beginPath(); ctx.moveTo(padX + 40, y); ctx.lineTo(padX + padW - 40, y); ctx.stroke()
-      }
-
-      // 顶部标题栏分隔线
-      ctx.strokeStyle = 'rgba(160,155,145,0.4)'
-      ctx.lineWidth = 2
-      ctx.beginPath(); ctx.moveTo(padX + 40, padY + 70); ctx.lineTo(padX + padW - 40, padY + 70); ctx.stroke()
-
-      // 顶部标签文字
-      ctx.fillStyle = '#AAA'
-      ctx.font = `400 28px ${F}`
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillText('NOTE', padX + 50, padY + 45)
-      ctx.textAlign = 'right'
-      ctx.fillText('202X.01.01', padX + padW - 50, padY + 45)
-
-      // 笔记夹（顶部棕色夹子）
-      ctx.fillStyle = '#7B5B3A'
-      roundRectTop(ctx, w / 2 - 120, padY - 55, 240, 75, 14)
-      ctx.fill()
-      ctx.fillStyle = '#6B4B2A'
-      ctx.fillRect(w / 2 - 100, padY - 15, 200, 20)
-
-      // 主标题 — 手写体居中
-      ctx.fillStyle = '#3A3530'
-      ctx.font = `400 78px ${F}`
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      const maxTitleW = padW - 120
-      const lines = smartWrap(ctx, data.title, maxTitleW)
-      const lh = 95
-      const blockH = lines.length * lh
-      const startY = padY + (padH - blockH) / 2 + 20
-
-      lines.forEach((line, i) => {
-        ctx.fillText(line, padX + 60, startY + i * lh)
-      })
-
-      // 副标题 — 右下角署名
-      if (data.subtitle) {
-        ctx.fillStyle = '#888'
-        ctx.font = `400 48px ${F}`
-        ctx.textAlign = 'right'
-        fitFontSize(ctx, data.subtitle, maxTitleW - 40, 48, 28, `400 48px ${F}`)
-        ctx.fillText('—— ' + data.subtitle, padX + padW - 60, startY + blockH + 50)
-      }
-
-      // 右侧钢笔装饰
-      ctx.save()
-      ctx.translate(w - 170, h * 0.3)
-      ctx.rotate(0.15)
-      // 笔杆
-      ctx.fillStyle = '#B0B5B8'
-      roundRect(ctx, 0, 0, 22, 320, 4); ctx.fill()
-      // 笔尖
-      ctx.fillStyle = '#666'
-      ctx.beginPath(); ctx.moveTo(2, 320); ctx.lineTo(20, 320); ctx.lineTo(11, 365); ctx.closePath(); ctx.fill()
-      // 笔夹
-      ctx.fillStyle = '#CCC'
-      ctx.fillRect(-6, 20, 8, 100)
-      ctx.restore()
-    },
-  },
-
-  // ===== 20. 线圈笔记本风 — 手写潦草体 =====
-  {
-    id: 'spiral_notebook',
-    name: '线圈笔记本风',
-    desc: '米白纸底+左侧线圈+横线+手写体+勾选框+钢笔装饰',
-    render: (ctx, w, h, data) => {
-      const F = FONTS.LONGCANG
-      // 米白色纸张背景
-      ctx.fillStyle = '#FAF7F0'
-      ctx.fillRect(0, 0, w, h)
-
-      // 微纹理
-      ctx.fillStyle = 'rgba(200,190,170,0.04)'
-      for (let i = 0; i < 200; i++) {
-        const px = Math.random() * w, py = Math.random() * h
-        ctx.fillRect(px, py, 2, 2)
-      }
-
-      // 横线
-      ctx.strokeStyle = 'rgba(190,185,175,0.4)'
-      ctx.lineWidth = 1.5
-      const lineStart = 200
-      const lineGap = 62
-      for (let y = lineStart; y < h - 80; y += lineGap) {
-        ctx.beginPath(); ctx.moveTo(100, y); ctx.lineTo(w - 80, y); ctx.stroke()
-      }
-
-      // 左侧勾选框
-      ctx.strokeStyle = 'rgba(180,175,165,0.5)'
-      ctx.lineWidth = 2
-      for (let y = lineStart; y < h - 200; y += lineGap) {
-        ctx.strokeRect(110, y + lineGap / 2 - 14, 28, 28)
-      }
-
-      // 顶部线圈装饰
-      const ringCount = 7
-      const ringSpacing = (w - 300) / (ringCount - 1)
-      for (let i = 0; i < ringCount; i++) {
-        const cx = 180 + i * ringSpacing
-        // 金属线圈
-        ctx.strokeStyle = '#C0C0C0'
-        ctx.lineWidth = 6
-        ctx.beginPath(); ctx.arc(cx, 120, 28, 0.5, Math.PI * 2 - 0.5); ctx.stroke()
-        ctx.strokeStyle = '#D8D8D8'
-        ctx.lineWidth = 4
-        ctx.beginPath(); ctx.arc(cx, 120, 28, Math.PI + 0.5, Math.PI * 2 - 0.5); ctx.stroke()
-      }
-
-      // 主标题 — 手写体居中
-      ctx.fillStyle = '#3A3530'
-      ctx.font = `400 70px ${F}`
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      const maxTitleW = w - 280
-      const lines = smartWrap(ctx, data.title, maxTitleW)
-      const lh = lineGap
-      // 计算文字总高度，将整体垂直居中于笔记本纸面
-      const totalTextH = lines.length * lh + (data.subtitle ? lh : 0)
-      const contentTop = lineStart + lh  // 纸面内容区顶部
-      const contentBot = h - 80          // 纸面内容区底部
-      const startY = contentTop + (contentBot - contentTop - totalTextH) / 2 + lh / 2
-
-      lines.forEach((line, i) => {
-        ctx.fillText(line, w / 2, startY + i * lh)
-      })
-
-      // 副标题 — 居中署名
-      if (data.subtitle) {
-        ctx.fillStyle = '#888'
-        ctx.font = `400 48px ${F}`
-        ctx.textAlign = 'center'
-        fitFontSize(ctx, data.subtitle, maxTitleW - 40, 48, 28, `400 48px ${F}`)
-        const subY = startY + lines.length * lh + lh
-        ctx.fillText('—— ' + data.subtitle, w / 2, subY)
-      }
-
-      // 右侧钢笔装饰
-      ctx.save()
-      ctx.translate(w - 140, h * 0.25)
-      ctx.rotate(0.12)
-      ctx.fillStyle = '#C0C5C8'
-      roundRect(ctx, 0, 0, 20, 280, 4); ctx.fill()
-      ctx.fillStyle = '#888'
-      ctx.beginPath(); ctx.moveTo(2, 280); ctx.lineTo(18, 280); ctx.lineTo(10, 318); ctx.closePath(); ctx.fill()
-      ctx.fillStyle = '#DDD'
-      ctx.fillRect(-5, 20, 7, 80)
-      // 笔帽按钮
-      ctx.fillStyle = '#AAA'
-      ctx.beginPath(); ctx.arc(10, -8, 12, 0, Math.PI * 2); ctx.fill()
-      ctx.restore()
     },
   },
 ]

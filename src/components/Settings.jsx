@@ -1,15 +1,31 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function Settings({ settings, onSave }) {
   const [form, setForm] = useState({ ...settings })
   const [saved, setSaved] = useState(false)
+  const debounceRef = useRef(null)
+
+  // 同步外部 settings prop 变化
+  useEffect(() => {
+    setForm({ ...settings })
+  }, [settings])
 
   const handleChange = (key, val) => {
-    setForm(prev => ({ ...prev, [key]: val }))
+    const next = { ...form, [key]: val }
+    setForm(next)
     setSaved(false)
+
+    // 自动保存（防抖 500ms）
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      onSave(next)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    }, 500)
   }
 
   const handleSave = () => {
+    clearTimeout(debounceRef.current)
     onSave(form)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -47,6 +63,10 @@ export default function Settings({ settings, onSave }) {
       <button className="btn-primary" onClick={handleSave}>
         {saved ? '✅ 已保存' : '保存配置'}
       </button>
+
+      <p style={{ fontSize: 12, color: '#999', marginTop: 8 }}>
+        💡 输入后自动保存，配置存储在浏览器本地，刷新页面不会丢失
+      </p>
     </div>
   )
 }

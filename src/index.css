@@ -488,15 +488,6 @@ body {
   background: #FFF8F8;
 }
 
-.note-card-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  cursor: pointer;
-  position: relative;
-}
-
 .note-meta {
   display: flex;
   gap: 6px;
@@ -593,6 +584,13 @@ body {
   font-weight: 500;
   margin-top: 8px;
   color: var(--text-2);
+}
+
+.cover-desc {
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+  line-height: 1.4;
 }
 
 /* === Qianfan Sync === */
@@ -1088,6 +1086,132 @@ body {
   padding: 20px;
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* === Humanize Toolbar === */
+.humanize-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #F5F0FF;
+  border: 1.5px solid #D1C4E9;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.humanize-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+}
+
+.humanize-select-all input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #9C27B0;
+  cursor: pointer;
+}
+
+.humanize-selected-count {
+  font-size: 13px;
+  color: #7B1FA2;
+  font-weight: 600;
+}
+
+.humanize-toolbar-actions {
+  margin-left: auto;
+}
+
+.btn-humanize {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 20px;
+  background: linear-gradient(135deg, #9C27B0 0%, #BA68C8 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-humanize:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(156,39,176,0.3);
+}
+
+.btn-humanize:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-humanize-stop {
+  background: linear-gradient(135deg, #F44336 0%, #EF5350 100%);
+}
+
+.btn-humanize-stop:hover {
+  box-shadow: 0 4px 12px rgba(244,67,54,0.3);
+}
+
+/* === Note Checkbox === */
+.note-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #9C27B0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.note-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  position: relative;
+}
+
+.note-card-header-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+/* === Humanized Badge === */
+.badge-humanized {
+  background: #E8F5E9;
+  color: #2E7D32;
+  font-size: 11px;
+}
+
+.note-card.humanized {
+  border-color: #C8E6C9;
+}
+
+/* === Single Humanize Button === */
+.btn-humanize-single {
+  color: #7B1FA2 !important;
+  border-color: #CE93D8 !important;
+  background: #F3E5F5 !important;
+}
+
+.btn-humanize-single:hover:not(:disabled) {
+  background: #E1BEE7 !important;
+}
+
+.btn-humanize-single:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* === Responsive === */

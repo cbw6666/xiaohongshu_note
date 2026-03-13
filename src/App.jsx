@@ -7,10 +7,12 @@ import BatchGenerator from './components/BatchGenerator.jsx'
 import NotePreview from './components/NotePreview.jsx'
 import ExportPanel from './components/ExportPanel.jsx'
 import CoverGallery from './components/CoverGallery.jsx'
+import NoteCollector from './components/NoteCollector.jsx'
 import { loadSettings, saveSettings, loadShops, saveShops, loadGenerated, saveGenerated } from './utils/storage.js'
 
 const TABS = [
   { id: 'shops', label: '🏪 店铺管理' },
+  { id: 'collect', label: '📥 笔记采集' },
   { id: 'generate', label: '🚀 批量生成' },
   { id: 'results', label: '📋 生成结果' },
   { id: 'covers', label: '🎨 封面预览' },
@@ -179,12 +181,22 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'collect' && (
+          <NoteCollector
+            settings={settings}
+            shops={shops}
+            activeShopId={activeShopId}
+            onGenerated={handleGenerated}
+          />
+        )}
+
         {activeTab === 'results' && (
           <>
             <NotePreview
               notes={generated}
               onUpdateNote={handleUpdateNote}
               onDeleteNote={handleDeleteNote}
+              settings={settings}
             />
             {generated.length > 0 && (
               <>

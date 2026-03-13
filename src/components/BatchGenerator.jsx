@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitlePrompt } from '../services/aiService.js'
+import { deduplicateImage } from '../utils/imageDeduplicator.js'
 
 export default function BatchGenerator({ settings, shops, onGenerated, innerImagesMap }) {
   const [generating, setGenerating] = useState(false)
@@ -152,6 +153,21 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 }
               }
 
+              // 对内页图进行去重处理，使同商品不同笔记的内页图 MD5 各不相同
+              const rawInnerImages = innerImagesMap?.[product.id] || []
+              let dedupedInnerImages = rawInnerImages
+              if (rawInnerImages.length > 0) {
+                setProgress({
+                  current: count,
+                  total: totalNotes,
+                  text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 内页图去重...`,
+                })
+                dedupedInnerImages = []
+                for (const img of rawInnerImages) {
+                  dedupedInnerImages.push(await deduplicateImage(img))
+                }
+              }
+
               results.push({
                 id: `${Date.now()}_${count}`,
                 shopId: shop.id,
@@ -167,12 +183,22 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 tags: parsed.tags || '',
                 coverTitle: product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8),
                 coverSubtitle: product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || '',
-                innerImages: innerImagesMap?.[product.id] || [],
+                innerImages: dedupedInnerImages,
                 raw,
                 createdAt: new Date().toISOString(),
               })
             } catch (err) {
               console.error('生成失败:', err)
+              // 失败时也对内页图去重
+              const rawInnerImages = innerImagesMap?.[product.id] || []
+              let dedupedInnerImages = rawInnerImages
+              if (rawInnerImages.length > 0) {
+                dedupedInnerImages = []
+                for (const img of rawInnerImages) {
+                  dedupedInnerImages.push(await deduplicateImage(img))
+                }
+              }
+
               results.push({
                 id: `${Date.now()}_${count}`,
                 shopId: shop.id,
@@ -188,7 +214,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 tags: '',
                 coverTitle: product.customCoverTitle || cleanName.slice(0, 8),
                 coverSubtitle: product.customCoverSubtitle || '',
-                innerImages: innerImagesMap?.[product.id] || [],
+                innerImages: dedupedInnerImages,
                 raw: '',
                 error: true,
                 createdAt: new Date().toISOString(),

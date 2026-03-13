@@ -127,22 +127,37 @@ export async function exportExcel(notes, onProgress, innerImagesMap) {
 
     // 渲染封面图并嵌入
     try {
-      const blob = await renderCoverToBlob(
-        n.coverTemplateId,
-        { title: n.coverTitle, subtitle: n.coverSubtitle },
-        i
-      )
-      const base64 = await blobToBase64(blob)
-      const imageId = workbook.addImage({
-        base64,
-        extension: 'png',
-      })
+      let base64 = null
+      let extension = 'png'
 
-      // 将图片锚定到笔记封面列（第8列，索引7）
-      sheet.addImage(imageId, {
-        tl: { col: 7, row: i + 1 },  // +1 因为表头占第0行
-        ext: { width: coverW, height: coverH },
-      })
+      if (n.source === 'collected' && n.coverImage) {
+        // 采集的笔记：直接使用原图作为封面
+        base64 = n.coverImage.includes(',') ? n.coverImage.split(',')[1] : n.coverImage
+        if (n.coverImage.startsWith('data:image/jpeg') || n.coverImage.startsWith('data:image/jpg')) {
+          extension = 'jpeg'
+        }
+      } else {
+        // AI 生成的笔记：用模板渲染封面
+        const blob = await renderCoverToBlob(
+          n.coverTemplateId,
+          { title: n.coverTitle, subtitle: n.coverSubtitle },
+          i
+        )
+        base64 = await blobToBase64(blob)
+      }
+
+      if (base64) {
+        const imageId = workbook.addImage({
+          base64,
+          extension,
+        })
+
+        // 将图片锚定到笔记封面列（第8列，索引7）
+        sheet.addImage(imageId, {
+          tl: { col: 7, row: i + 1 },  // +1 因为表头占第0行
+          ext: { width: coverW, height: coverH },
+        })
+      }
     } catch (err) {
       console.warn(`封面图渲染失败(第${i + 1}条):`, err)
       row.getCell(8).value = '[封面生成失败]'
@@ -152,16 +167,17 @@ export async function exportExcel(notes, onProgress, innerImagesMap) {
     for (let j = 0; j < innerImages.length; j++) {
       try {
         const imgData = innerImages[j]
-        // 内页图是 data URL (base64)，需要提取纯 base64 部分
-        const pureBase64 = imgData.includes(',') ? imgData.split(',')[1] : imgData
-        // 判断图片格式
-        let extension = 'png'
+
+        let pureBase64, extension
+        // 直接使用原图
+        pureBase64 = imgData.includes(',') ? imgData.split(',')[1] : imgData
+        extension = 'png'
         if (imgData.startsWith('data:image/jpeg') || imgData.startsWith('data:image/jpg')) {
           extension = 'jpeg'
         } else if (imgData.startsWith('data:image/gif')) {
           extension = 'gif'
         } else if (imgData.startsWith('data:image/webp')) {
-          extension = 'png' // ExcelJS 不支持 webp，用 png 兜底
+          extension = 'png'
         }
 
         const innerImageId = workbook.addImage({
