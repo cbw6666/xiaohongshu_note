@@ -4,6 +4,7 @@ import { extractNoteId, parseNote, downloadImage, randomDelay, delay, SPEED_PRES
 import { rewriteContent } from '../services/rewriteService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { humanizeNote } from '../services/humanizerService.js'
+import { createStreamWriter } from '../utils/streamExportUtils.js'
 
 // 状态枚举
 const STATUS = {
@@ -13,6 +14,7 @@ const STATUS = {
   REWRITING: 'rewriting',
   PAUSED: 'paused',          // 风控退避暂停中
   BATCH_RESTING: 'batch_resting', // 批间休息中
+  ONE_CLICK: 'one_click',    // 一键采集+处理+导出中
 }
 
 /** 格式化毫秒为 mm:ss */
@@ -478,6 +480,351 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
     onGenerated(converted)
   }, [notes, globalSettings, onGenerated])
 
+  // ============ 一键采集 + 处理 + 导出 Excel（流式写入） ============
+  const [oneClickProgress, setOneClickProgress] = useState(null) // { phase, completed, total, text }
+  const streamWriterRef = useRef(null)
+
+  const handleOneClick = useCallback(async () => {
+    // 收集待处理的条目
+    let itemsToProcess = []
+
+    if (excelData?.rows?.length) {
+      itemsToProcess = excelData.rows.map(r => ({
+        url: r.url,
+        shopName: r.shopName,
+        accountName: r.accountName,
+        productName: r.productName,
+        productId: r.productId,
+        remark: r.remark,
+      }))
+    } else {
+      itemsToProcess = notes
+        .filter(n => n.url && (!n.title || n.title === ''))
+        .map(n => ({
+          url: n.url,
+          shopName: n.shopName,
+          accountName: n.accountName,
+          productName: n.productName,
+          productId: n.productItemId,
+          remark: n.remark,
+        }))
+    }
+
+    if (itemsToProcess.length === 0) {
+      alert('没有待处理的链接，请先上传 Excel 文件')
+      return
+    }
+
+    // 第一步：弹出"另存为"对话框，让用户选择保存位置
+    let writer
+    try {
+      writer = await createStreamWriter()
+      streamWriterRef.current = writer
+    } catch (err) {
+      if (err.name === 'AbortError') return // 用户取消了
+      alert('创建文件失败: ' + err.message)
+      return
+    }
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    setStatus(STATUS.ONE_CLICK)
+
+    const speed = SPEED_PRESETS[speedMode]
+    const total = itemsToProcess.length
+    let successCount = 0
+    let failCount = 0
+
+    setOneClickProgress({
+      phase: '采集',
+      completed: 0,
+      total,
+      text: '准备开始...',
+      successCount: 0,
+      failCount: 0,
+    })
+
+    // 分批处理
+    const batches = []
+    for (let i = 0; i < itemsToProcess.length; i += speed.batchSize) {
+      batches.push(itemsToProcess.slice(i, i + speed.batchSize))
+    }
+
+    const rlm = rateLimitRef.current
+    rlm.reset()
+    let processedCount = 0
+
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      if (controller.signal.aborted) break
+
+      const batch = batches[batchIdx]
+      setBatchInfo({ current: batchIdx + 1, total: batches.length })
+
+      for (let i = 0; i < batch.length; i++) {
+        if (controller.signal.aborted) break
+
+        const row = batch[i]
+        processedCount++
+
+        setOneClickProgress(prev => ({
+          ...prev,
+          phase: '采集',
+          completed: processedCount,
+          text: `[${batchIdx + 1}/${batches.length}批] 采集第 ${processedCount}/${total} 条...`,
+        }))
+
+        // 请求间隔
+        if (processedCount > 1) {
+          setCountdownLabel('请求间隔')
+          try {
+            const waitMs = Math.floor(Math.random() * (speed.noteMax - speed.noteMin + 1)) + speed.noteMin
+            setCountdown(waitMs)
+            await delay(waitMs, controller.signal)
+            setCountdown(0)
+            setCountdownLabel('')
+          } catch (e) {
+            if (e.name === 'AbortError') break
+          }
+        }
+
+        // 采集
+        const result = await parseNote(row.url, { signal: controller.signal })
+
+        // 风控退避
+        if (result.blocked) {
+          const { shouldStop, waitMs } = rlm.recordBlock()
+          if (shouldStop) {
+            // 写入失败行
+            try {
+              await writer.appendRow({
+                shopName: row.shopName || globalSettings.shopName,
+                accountName: row.accountName || globalSettings.accountName,
+                productName: row.productName || globalSettings.productName,
+                productItemId: row.productId || globalSettings.productItemId,
+                title: '',
+                content: `风控拦截: ${result.error || '连续被拦截'}`,
+                tags: [],
+                status: '失败',
+                url: row.url,
+              })
+            } catch {}
+            failCount++
+
+            setStatus(STATUS.PAUSED)
+            setOneClickProgress(prev => ({
+              ...prev,
+              text: `⚠️ 连续 ${rlm.maxConsecutive} 次被风控拦截，已自动暂停。`,
+              failCount,
+            }))
+            setCountdown(0)
+            setCountdownLabel('')
+            setBatchInfo(null)
+            abortRef.current = null
+
+            try {
+              await writer.finalize({ total: processedCount, success: successCount, fail: failCount })
+            } catch {}
+            setStatus(STATUS.IDLE)
+            streamWriterRef.current = null
+            return
+          }
+
+          // 退避等待
+          setCountdownLabel(`风控退避中（第 ${rlm.consecutiveBlocks} 次）`)
+          setCountdown(waitMs)
+          try {
+            const endTime = Date.now() + waitMs
+            while (Date.now() < endTime) {
+              if (controller.signal.aborted) break
+              setCountdown(endTime - Date.now())
+              await delay(Math.min(1000, endTime - Date.now()), controller.signal)
+            }
+          } catch (e) {
+            if (e.name === 'AbortError') break
+          }
+          setCountdown(0)
+          setCountdownLabel('')
+
+          // 写入失败行
+          try {
+            await writer.appendRow({
+              shopName: row.shopName || globalSettings.shopName,
+              accountName: row.accountName || globalSettings.accountName,
+              productName: row.productName || globalSettings.productName,
+              productItemId: row.productId || globalSettings.productItemId,
+              title: '',
+              content: `风控拦截: ${result.error || ''}`,
+              tags: [],
+              status: '失败',
+              url: row.url,
+            })
+          } catch {}
+          failCount++
+          setOneClickProgress(prev => ({ ...prev, failCount }))
+          continue
+        }
+
+        if (result.success) {
+          rlm.recordSuccess()
+        }
+
+        // 采集失败的直接写入 Excel
+        if (!result.success) {
+          try {
+            await writer.appendRow({
+              shopName: row.shopName || globalSettings.shopName,
+              accountName: row.accountName || globalSettings.accountName,
+              productName: row.productName || globalSettings.productName,
+              productItemId: row.productId || globalSettings.productItemId,
+              title: '',
+              content: `采集失败: ${result.error || '未知错误'}`,
+              tags: [],
+              status: '失败',
+              url: row.url,
+            })
+          } catch {}
+          failCount++
+          setOneClickProgress(prev => ({ ...prev, failCount }))
+          continue
+        }
+
+        // 采集成功，进行 AI 改写 + 去 AI 味
+        let finalContent = result.content || ''
+        let finalTitle = result.title || ''
+        let finalTags = result.tags || []
+
+        // AI 改写
+        if (globalSettings.enableRewrite && settings?.apiKey && finalContent) {
+          setOneClickProgress(prev => ({
+            ...prev,
+            phase: '改写',
+            text: `[${batchIdx + 1}/${batches.length}批] 改写第 ${processedCount}/${total} 条...`,
+          }))
+          try {
+            const rw = await rewriteContent(finalContent, settings, globalSettings.rewritePrompt)
+            if (rw.success) finalContent = rw.content
+          } catch { /* 改写失败不影响流程 */ }
+        }
+
+        // 去 AI 味
+        if (globalSettings.enableHumanize && settings?.apiKey && finalContent) {
+          setOneClickProgress(prev => ({
+            ...prev,
+            phase: '去AI味',
+            text: `[${batchIdx + 1}/${batches.length}批] 去AI味第 ${processedCount}/${total} 条...`,
+          }))
+          try {
+            const humanized = await humanizeNote(
+              settings,
+              { title: finalTitle, content: finalContent, tags: finalTags.map(t => '#' + t).join(' ') }
+            )
+            if (humanized?.content) finalContent = humanized.content
+            if (humanized?.title) finalTitle = humanized.title
+          } catch { /* 去 AI 味失败不影响 */ }
+        }
+
+        // 写入 Excel
+        setOneClickProgress(prev => ({
+          ...prev,
+          phase: '写入',
+          text: `[${batchIdx + 1}/${batches.length}批] 写入第 ${processedCount}/${total} 条...`,
+        }))
+
+        try {
+          await writer.appendRow({
+            shopName: row.shopName || globalSettings.shopName,
+            accountName: row.accountName || globalSettings.accountName,
+            productName: row.productName || globalSettings.productName,
+            productItemId: row.productId || globalSettings.productItemId,
+            title: finalTitle,
+            content: finalContent,
+            tags: finalTags.slice(0, globalSettings.maxTags),
+            status: '完成',
+            url: row.url,
+          })
+          successCount++
+        } catch (err) {
+          console.error('写入 Excel 失败:', err)
+          failCount++
+        }
+
+        setOneClickProgress(prev => ({
+          ...prev,
+          successCount,
+          failCount,
+        }))
+
+        // 同时更新到页面上的笔记列表
+        const note = {
+          id: `oneclick_${Date.now()}_${processedCount}`,
+          url: row.url,
+          noteId: result.noteId || '',
+          title: finalTitle,
+          content: finalContent,
+          originalContent: result.content || '',
+          tags: finalTags,
+          images: result.images || [],
+          downloadedImages: [],
+          author: result.author || '',
+          shopName: row.shopName || globalSettings.shopName,
+          accountName: row.accountName || globalSettings.accountName,
+          productName: row.productName || globalSettings.productName,
+          productItemId: row.productId || globalSettings.productItemId,
+          remark: row.remark || '',
+          parseSuccess: true,
+          parseError: '',
+          partial: result.partial || false,
+          rewritten: globalSettings.enableRewrite,
+          deduplicated: false,
+        }
+        setNotes(prev => [...prev, note])
+      }
+
+      // 批间休息（最后一批不休息）
+      if (batchIdx < batches.length - 1 && !controller.signal.aborted) {
+        const restMs = Math.floor(Math.random() * (speed.batchRest[1] - speed.batchRest[0] + 1)) + speed.batchRest[0]
+        setCountdownLabel(`批间休息中（${batchIdx + 1}/${batches.length} 批完成）`)
+        setCountdown(restMs)
+        setOneClickProgress(prev => ({
+          ...prev,
+          phase: '休息',
+          text: `✅ 第 ${batchIdx + 1} 批完成，休息 ${formatCountdown(restMs)} 后继续...`,
+        }))
+
+        try {
+          const endTime = Date.now() + restMs
+          while (Date.now() < endTime) {
+            if (controller.signal.aborted) break
+            setCountdown(endTime - Date.now())
+            await delay(Math.min(1000, endTime - Date.now()), controller.signal)
+          }
+        } catch (e) {
+          if (e.name === 'AbortError') break
+        }
+        setCountdown(0)
+        setCountdownLabel('')
+      }
+    }
+
+    // 写入汇总并完成
+    try {
+      await writer.finalize({ total, success: successCount, fail: failCount })
+    } catch {}
+
+    setStatus(STATUS.IDLE)
+    setBatchInfo(null)
+    setCountdown(0)
+    setCountdownLabel('')
+    setOneClickProgress(prev => ({
+      ...prev,
+      phase: '完成',
+      completed: total,
+      text: `✅ 全部完成！成功 ${successCount} 条，失败 ${failCount} 条，已保存到 Excel`,
+    }))
+    abortRef.current = null
+    streamWriterRef.current = null
+  }, [excelData, notes, globalSettings, settings, speedMode])
+
   // ============ 停止操作 ============
   const handleStop = () => {
     abortRef.current?.abort()
@@ -553,6 +900,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
   const isBusy = status !== STATUS.IDLE && status !== STATUS.PAUSED
   const isPaused = status === STATUS.PAUSED
   const isResting = status === STATUS.BATCH_RESTING
+  const isOneClick = status === STATUS.ONE_CLICK
   const successCount = notes.filter(n => n.parseSuccess).length
   const failCount = notes.filter(n => !n.parseSuccess).length
 
@@ -723,6 +1071,116 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
         </div>
       )}
 
+      {/* ===== 一键采集+处理+导出 ===== */}
+      {(excelData || notes.length > 0) && (
+        <div style={{
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: 12, padding: '16px 20px', marginBottom: 16,
+          color: '#fff',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <span style={{ fontSize: 22 }}>🚀</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>一键采集 + 处理 + 导出 Excel</div>
+              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                自动采集全部链接 → AI改写 → 去AI味 → 实时写入Excel（每处理完一条立即保存，不丢数据）
+              </div>
+            </div>
+          </div>
+
+          {!isOneClick && (
+            <button
+              onClick={handleOneClick}
+              disabled={isBusy || isPaused}
+              style={{
+                background: '#fff', color: '#764ba2', border: 'none',
+                padding: '10px 28px', borderRadius: 8, fontWeight: 700,
+                fontSize: 14, cursor: isBusy ? 'not-allowed' : 'pointer',
+                opacity: isBusy ? 0.6 : 1,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                transition: 'all .2s',
+              }}
+            >
+              📊 开始一键采集+导出 ({excelData?.totalRows || notes.filter(n => n.url && !n.title).length} 条)
+            </button>
+          )}
+
+          {isOneClick && (
+            <div>
+              {/* 进度条 */}
+              {oneClickProgress && oneClickProgress.total > 0 && (
+                <div style={{
+                  background: 'rgba(255,255,255,0.2)', borderRadius: 6,
+                  height: 8, marginBottom: 10, overflow: 'hidden',
+                }}>
+                  <div style={{
+                    height: '100%', borderRadius: 6,
+                    background: '#fff',
+                    width: `${(oneClickProgress.completed / oneClickProgress.total) * 100}%`,
+                    transition: 'width 0.3s',
+                  }} />
+                </div>
+              )}
+
+              {/* 状态文字 */}
+              {oneClickProgress && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 13, flex: 1, minWidth: 200 }}>
+                    {oneClickProgress.text}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, fontSize: 12, opacity: 0.85 }}>
+                    <span>✅ {oneClickProgress.successCount || 0}</span>
+                    <span>❌ {oneClickProgress.failCount || 0}</span>
+                    <span>{oneClickProgress.completed}/{oneClickProgress.total}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 阶段指示器 */}
+              {oneClickProgress && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  {['采集', '改写', '去AI味', '写入'].map(phase => (
+                    <span key={phase} style={{
+                      padding: '2px 10px', borderRadius: 12, fontSize: 11,
+                      background: oneClickProgress.phase === phase
+                        ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.15)',
+                      color: oneClickProgress.phase === phase ? '#764ba2' : 'rgba(255,255,255,0.6)',
+                      fontWeight: oneClickProgress.phase === phase ? 700 : 400,
+                      transition: 'all .3s',
+                    }}>
+                      {phase}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* 停止按钮 */}
+              <button
+                onClick={handleStop}
+                style={{
+                  marginTop: 10, background: 'rgba(255,255,255,0.2)',
+                  border: '1px solid rgba(255,255,255,0.4)',
+                  color: '#fff', padding: '6px 16px', borderRadius: 6,
+                  fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                ⏹ 停止
+              </button>
+            </div>
+          )}
+
+          {/* 完成后的结果提示 */}
+          {!isOneClick && oneClickProgress?.phase === '完成' && (
+            <div style={{
+              marginTop: 10, padding: '8px 14px', borderRadius: 8,
+              background: 'rgba(255,255,255,0.15)', fontSize: 13,
+            }}>
+              {oneClickProgress.text}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ===== 操作按钮 ===== */}
       {(excelData || notes.length > 0) && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -776,7 +1234,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
               </button>
             </>
           )}
-          {(isBusy || isResting) && (
+          {(isBusy || isResting) && !isOneClick && (
             <button className="btn-danger btn-sm" onClick={handleStop}>
               ⏹ 停止
             </button>
@@ -785,9 +1243,9 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
       )}
 
       {/* ===== 进度条 + 倒计时 ===== */}
-      {(isBusy || isPaused || isResting || progress.text) && (
+      {(isBusy || isPaused || isResting || progress.text || (isOneClick && countdown > 0)) && (
         <div style={{ marginBottom: 16 }}>
-          {progress.total > 0 && (
+          {!isOneClick && progress.total > 0 && (
             <div className="progress-bar" style={{ marginBottom: 6 }}>
               <div
                 className="progress-fill"
@@ -795,7 +1253,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
               />
             </div>
           )}
-          <div style={{ fontSize: 13, color: '#666' }}>{progress.text}</div>
+          {!isOneClick && <div style={{ fontSize: 13, color: '#666' }}>{progress.text}</div>}
 
           {/* 倒计时显示 */}
           {countdown > 0 && (
@@ -823,7 +1281,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
           )}
 
           {/* 预计时间 */}
-          {isBusy && progress.total > 0 && progress.completed > 0 && !countdown && (
+          {isBusy && !isOneClick && progress.total > 0 && progress.completed > 0 && !countdown && (
             <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>
               预计剩余 ~{formatCountdown(
                 ((progress.total - progress.completed) * (SPEED_PRESETS[speedMode].noteMin + SPEED_PRESETS[speedMode].noteMax) / 2)

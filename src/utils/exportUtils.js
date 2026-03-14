@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import { renderCoverToBlob } from './coverRenderer.js'
+import { deduplicateImage } from './imageDeduplicator.js'
 
 // 将 Blob 转为 base64 字符串
 function blobToBase64(blob) {
@@ -91,9 +92,21 @@ export async function exportExcel(notes, onProgress, innerImagesMap) {
     }
 
     // 获取该笔记的内页图（优先笔记自带，其次从 map 中取）
-    const innerImages = (n.innerImages && n.innerImages.length > 0)
-      ? n.innerImages
-      : (innerImagesMap?.[n.productId] || [])
+    // 笔记自带的已在生成/采集阶段去重；fallback 到 innerImagesMap 的需要在此去重
+    let innerImages
+    if (n.innerImages && n.innerImages.length > 0) {
+      innerImages = n.innerImages
+    } else {
+      const rawImages = innerImagesMap?.[n.productId] || []
+      if (rawImages.length > 0) {
+        innerImages = []
+        for (const img of rawImages) {
+          innerImages.push(await deduplicateImage(img))
+        }
+      } else {
+        innerImages = []
+      }
+    }
 
     const rowData = [
       n.shopName,
