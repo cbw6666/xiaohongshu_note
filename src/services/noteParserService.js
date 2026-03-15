@@ -297,11 +297,16 @@ function parseFromMeta(html) {
   // 从正文中提取标签
   const desc = descMatch?.[1] || ''
   const tagMatches = desc.match(/#[^\s#]+/g) || []
-  const cleanDesc = desc.replace(/#[^\s#]+/g, '').trim()
+  let cleanDesc = desc.replace(/#[^\s#]+/g, '').trim()
+  const title = titleMatch?.[1]?.replace(' - 小红书', '')?.trim() || ''
+
+  if (!cleanDesc) {
+    cleanDesc = title
+  }
 
   return {
     success: true,
-    title: titleMatch?.[1]?.replace(' - 小红书', '')?.trim() || '',
+    title,
     content: cleanDesc,
     tags: tagMatches.map(t => t.replace('#', '')),
     images: [],
