@@ -70,13 +70,14 @@ ${originalContent}
  */
 export async function rewriteTitle(originalTitle, settings, { content = '', productName = '' } = {}) {
   const systemPrompt = `你是小红书标题改写专家。改写规则：
-1. 保留核心信息，换一种表达方式
+1. 保留原文标题的主题方向和核心信息，换一种表达方式（改写后的标题必须和原标题说的是同一件事）
 2. 标题必须控制在20字以内（汉字、标点符号、字母、数字各占1个位置，每个emoji占2个位置）
 3. 可以使用emoji增加吸引力
 4. 制造好奇心或紧迫感
 5. 直接输出新标题，不要任何前缀、引号或解释
 6. 不能使用违禁词/敏感词（如：最、第一、唯一、顶级、保证、免费领、加微信等），用合规替代表达
-7. 不能出现虚假宣传、夸大功效或误导性表述`
+7. 不能出现虚假宣传、夸大功效或误导性表述
+8. 如果提供了商品名称，可以围绕商品来改写；如果没有提供商品名称，严格围绕原标题主题改写，不要引入无关内容`
 
   let userPrompt = `改写这个标题：${originalTitle}`
   if (productName) userPrompt += `\n商品名称：${productName}`

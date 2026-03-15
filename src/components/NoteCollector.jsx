@@ -293,6 +293,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
           partial: result.partial || false,
           rewritten: false,
           deduplicated: false,
+          contentFromTitle: result.contentFromTitle || false,
         }
 
         // 尝试下载图片（带延迟）
@@ -413,27 +414,35 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
         text: `正在改写第 ${i + 1}/${toRewrite.length} 条...`
       })
 
-      // 先改写正文
+      // 先改写正文（标题兜底的跳过，避免 AI 乱编内容）
       let rewrittenContent = note.content
       let rewrittenTitle = note.title
       if (globalSettings.enableRewrite) {
-        const result = await rewriteContent(note.content, settings, globalSettings.rewritePrompt)
-        if (result.success) rewrittenContent = result.content
+        if (!note.contentFromTitle) {
+          const result = await rewriteContent(note.content, settings, globalSettings.rewritePrompt)
+          if (result.success) rewrittenContent = result.content
+        }
 
-        // 改写标题
+        // 改写标题（始终执行）
         if (note.title) {
           try {
             const rt = await rewriteTitle(note.title, settings, {
               content: rewrittenContent,
-              productName: note.productName || globalSettings.productName,
+              // contentFromTitle 时不传商品名，避免 AI 把标题往不相关商品方向靠
+              productName: note.contentFromTitle ? '' : (note.productName || globalSettings.productName),
             })
             if (rt.success) rewrittenTitle = rt.title
           } catch { /* 标题改写失败不影响主流程 */ }
         }
+
+        // 标题兜底时，正文用改写后的标题填充
+        if (note.contentFromTitle) {
+          rewrittenContent = rewrittenTitle
+        }
       }
 
-      // 再去 AI 味
-      if (globalSettings.enableHumanize) {
+      // 再去 AI 味（标题兜底的跳过）
+      if (globalSettings.enableHumanize && !note.contentFromTitle) {
         try {
           const humanized = await humanizeNote(
             settings,
@@ -721,7 +730,8 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             try {
               const rt = await rewriteTitle(finalTitle, settings, {
                 content: finalContent,
-                productName: row.productName || globalSettings.productName,
+                // contentFromTitle 时不传商品名，避免 AI 把标题往不相关商品方向靠
+                productName: result.contentFromTitle ? '' : (row.productName || globalSettings.productName),
               })
               if (rt.success) finalTitle = rt.title
             } catch { /* 标题改写失败不影响流程 */ }
