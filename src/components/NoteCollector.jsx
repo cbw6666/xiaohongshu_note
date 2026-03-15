@@ -707,12 +707,16 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             phase: '改写',
             text: `[${batchIdx + 1}/${batches.length}批] 改写第 ${processedCount}/${total} 条...`,
           }))
-          try {
-            const rw = await rewriteContent(finalContent, settings, globalSettings.rewritePrompt)
-            if (rw.success) finalContent = rw.content
-          } catch { /* 改写失败不影响流程 */ }
 
-          // 改写标题
+          // 正文改写（标题兜底的跳过，避免 AI 乱编内容）
+          if (!result.contentFromTitle) {
+            try {
+              const rw = await rewriteContent(finalContent, settings, globalSettings.rewritePrompt)
+              if (rw.success) finalContent = rw.content
+            } catch { /* 改写失败不影响流程 */ }
+          }
+
+          // 改写标题（始终执行）
           if (finalTitle) {
             try {
               const rt = await rewriteTitle(finalTitle, settings, {
@@ -722,10 +726,15 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
               if (rt.success) finalTitle = rt.title
             } catch { /* 标题改写失败不影响流程 */ }
           }
+
+          // 标题兜底时，正文用改写后的标题填充
+          if (result.contentFromTitle) {
+            finalContent = finalTitle
+          }
         }
 
-        // 去 AI 味
-        if (globalSettings.enableHumanize && settings?.apiKey && finalContent) {
+        // 去 AI 味（标题兜底的跳过）
+        if (globalSettings.enableHumanize && settings?.apiKey && finalContent && !result.contentFromTitle) {
           setOneClickProgress(prev => ({
             ...prev,
             phase: '去AI味',

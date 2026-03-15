@@ -280,14 +280,17 @@ function parseInitialState(html, noteId) {
 
     // 正文去标签后为空时，用标题兜底
     let cleanContent = descText.replace(/#[^\s#]+/g, '').trim()
+    let contentFromTitle = false
     if (!cleanContent) {
       cleanContent = noteData.title || ''
+      contentFromTitle = true
     }
 
     return {
       success: true,
       title: noteData.title || '',
       content: cleanContent,
+      contentFromTitle,
       tags,
       images,
       author: noteData.user?.nickname || '',
