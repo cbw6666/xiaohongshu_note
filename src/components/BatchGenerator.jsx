@@ -134,23 +134,32 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
               const raw = await callAI(settings, messages)
               const parsed = parseNoteResponse(raw)
 
-              // 校验标题字数，超过20字则只重新生成标题（最多重试2次）
+              // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
               let finalTitle = parsed.title
               const MAX_TITLE_LEN = 20
-              const MAX_RETITLE_RETRIES = 2
-              if (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN) {
-                for (let retry = 0; retry < MAX_RETITLE_RETRIES; retry++) {
-                  try {
-                    const retitleMessages = buildRetitlePrompt(finalTitle, parsed.content, product.name)
-                    const newTitle = (await callAI(settings, retitleMessages)).trim()
-                    if (newTitle && calcTitleLen(newTitle) <= MAX_TITLE_LEN) {
-                      finalTitle = newTitle
-                      break
-                    }
-                  } catch (e) {
-                    console.warn('重新生成标题失败:', e)
-                  }
+              const SAFE_LIMIT = 10 // 安全上限，防止死循环
+              let retitleAttempt = 0
+              while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < SAFE_LIMIT) {
+                retitleAttempt++
+                try {
+                  const retitleMessages = buildRetitlePrompt(finalTitle, parsed.content, product.name)
+                  const newTitle = (await callAI(settings, retitleMessages)).trim()
+                  if (newTitle) finalTitle = newTitle
+                } catch (e) {
+                  console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
                 }
+              }
+              // 兜底：如果重试耗尽仍超标，强制截断确保不超过20字
+              if (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN) {
+                let truncated = ''
+                let len = 0
+                for (const ch of finalTitle) {
+                  const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
+                  if (len + chLen > MAX_TITLE_LEN) break
+                  truncated += ch
+                  len += chLen
+                }
+                finalTitle = truncated
               }
 
               // 对内页图进行去重处理，使同商品不同笔记的内页图 MD5 各不相同

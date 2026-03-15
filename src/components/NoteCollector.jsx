@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { parseExcel, generateTemplate } from '../utils/excelImporter.js'
 import { extractNoteId, parseNote, downloadImage, randomDelay, delay, SPEED_PRESETS, RateLimitManager } from '../services/noteParserService.js'
 import { rewriteContent, rewriteTitle } from '../services/rewriteService.js'
+import { calcTitleLen, buildRetitlePrompt, callAI } from '../services/aiService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { humanizeNote } from '../services/humanizerService.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
@@ -443,6 +444,34 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
         } catch { /* 去 AI 味失败不影响主流程 */ }
       }
 
+      // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
+      {
+        const MAX_TITLE_LEN = 20
+        const SAFE_LIMIT = 10
+        let retitleAttempt = 0
+        while (rewrittenTitle && calcTitleLen(rewrittenTitle) > MAX_TITLE_LEN && retitleAttempt < SAFE_LIMIT) {
+          retitleAttempt++
+          try {
+            const retitleMessages = buildRetitlePrompt(rewrittenTitle, rewrittenContent, note.productName || globalSettings.productName)
+            const newTitle = (await callAI(settings, retitleMessages)).trim()
+            if (newTitle) rewrittenTitle = newTitle
+          } catch (e) {
+            console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
+          }
+        }
+        if (rewrittenTitle && calcTitleLen(rewrittenTitle) > MAX_TITLE_LEN) {
+          let truncated = ''
+          let len = 0
+          for (const ch of rewrittenTitle) {
+            const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
+            if (len + chLen > MAX_TITLE_LEN) break
+            truncated += ch
+            len += chLen
+          }
+          rewrittenTitle = truncated
+        }
+      }
+
       setNotes(prev => prev.map(n =>
         n.id === note.id
           ? { ...n, content: rewrittenContent, title: rewrittenTitle, rewritten: true }
@@ -710,6 +739,34 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             if (humanized?.content) finalContent = humanized.content
             if (humanized?.title) finalTitle = humanized.title
           } catch { /* 去 AI 味失败不影响 */ }
+        }
+
+        // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
+        {
+          const MAX_TITLE_LEN = 20
+          const SAFE_LIMIT = 10
+          let retitleAttempt = 0
+          while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < SAFE_LIMIT) {
+            retitleAttempt++
+            try {
+              const retitleMessages = buildRetitlePrompt(finalTitle, finalContent, row.productName || globalSettings.productName)
+              const newTitle = (await callAI(settings, retitleMessages)).trim()
+              if (newTitle) finalTitle = newTitle
+            } catch (e) {
+              console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
+            }
+          }
+          if (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN) {
+            let truncated = ''
+            let len = 0
+            for (const ch of finalTitle) {
+              const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
+              if (len + chLen > MAX_TITLE_LEN) break
+              truncated += ch
+              len += chLen
+            }
+            finalTitle = truncated
+          }
         }
 
         // 下载图片（带延迟）
