@@ -2,6 +2,7 @@
  * 流式 Excel 导出工具
  * 使用 File System Access API (showSaveFilePicker) 实现增量写入
  * 每处理完一条笔记就立即写入并保存，即使中途关闭浏览器已写入的数据也不会丢失
+ * 支持嵌入笔记封面和内页图片
  */
 import ExcelJS from 'exceljs'
 
@@ -15,10 +16,31 @@ function cleanProductName(name) {
 }
 
 /**
- * 创建流式 Excel 写入器
- * 用户先通过系统"另存为"对话框选择保存位置，然后返回一个 writer 对象
+ * 从 base64 data URL 中提取纯 base64 和扩展名
+ * @param {string} dataUrl - data:image/png;base64,xxxxx
+ * @returns {{ base64: string, extension: string } | null}
  */
-export async function createStreamWriter() {
+function parseBase64DataUrl(dataUrl) {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return null
+  const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+  if (!match) return null
+  return {
+    extension: match[1] === 'jpg' ? 'jpeg' : match[1], // ExcelJS 需要 jpeg 而非 jpg
+    base64: match[2],
+  }
+}
+
+// 图片列的固定宽度和行高
+const IMAGE_COL_WIDTH = 18       // Excel 列宽单位（约 130px）
+const IMAGE_ROW_HEIGHT = 140     // 有图片行的行高（px → Excel 约 140 * 0.75 pt）
+const NORMAL_ROW_HEIGHT = 22
+
+/**
+ * 创建流式 Excel 写入器
+ * @param {object} options
+ * @param {number} [options.maxInnerImages=5] - 最大内页图列数
+ */
+export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
   // 检测浏览器是否支持 File System Access API
   if (!('showSaveFilePicker' in window)) {
     throw new Error('您的浏览器不支持 showSaveFilePicker API，请使用 Chrome 86+ 或 Edge 86+ 浏览器')
@@ -40,8 +62,13 @@ export async function createStreamWriter() {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('笔记')
 
-  // 表头
-  const headers = ['序号', '店铺', '账号', '商品名称', '商品ID', '笔记标题', '正文', '标签', '状态', '来源链接']
+  // 构建表头：基础列 + 笔记封面 + 内页图1~N
+  const baseHeaders = ['序号', '店铺', '账号', '商品名称', '商品ID', '笔记标题', '正文', '标签', '状态', '来源链接']
+  const imageHeaders = ['笔记封面']
+  for (let i = 1; i <= maxInnerImages; i++) {
+    imageHeaders.push(`内页图${i}`)
+  }
+  const headers = [...baseHeaders, ...imageHeaders]
   const headerRow = sheet.addRow(headers)
 
   // 表头样式
@@ -55,8 +82,8 @@ export async function createStreamWriter() {
     }
   })
 
-  // 设置列宽
-  sheet.columns = [
+  // 设置列宽：基础列 + 图片列
+  const baseColWidths = [
     { width: 6 },   // 序号
     { width: 14 },  // 店铺
     { width: 14 },  // 账号
@@ -68,6 +95,14 @@ export async function createStreamWriter() {
     { width: 10 },  // 状态
     { width: 40 },  // 来源链接
   ]
+  const imageColWidths = []
+  for (let i = 0; i < 1 + maxInnerImages; i++) {
+    imageColWidths.push({ width: IMAGE_COL_WIDTH })
+  }
+  sheet.columns = [...baseColWidths, ...imageColWidths]
+
+  // 基础列数（图片列从第 baseCount+1 列开始）
+  const baseColCount = baseHeaders.length
 
   let rowIndex = 0
 
@@ -87,10 +122,14 @@ export async function createStreamWriter() {
 
     /**
      * 追加一行数据并立即保存
+     * @param {object} data - 笔记数据
+     * @param {string} [data.coverImage] - 封面图 base64 data URL
+     * @param {string[]} [data.innerImages] - 内页图 base64 data URL 数组
      */
     async appendRow(data) {
       rowIndex++
 
+      // 基础数据列（图片列先留空）
       const rowData = [
         rowIndex,
         data.shopName || '',
@@ -103,22 +142,79 @@ export async function createStreamWriter() {
         data.status || '完成',
         data.url || '',
       ]
+      // 图片列占位
+      for (let i = 0; i < 1 + maxInnerImages; i++) {
+        rowData.push('')
+      }
 
       const row = sheet.addRow(rowData)
+      const excelRowNumber = row.number // 实际 Excel 行号（1-based，含表头）
 
-      // 样式
-      row.height = 22
+      // 判断是否有图片
+      const hasCover = data.coverImage && parseBase64DataUrl(data.coverImage)
+      const innerImages = (data.innerImages || []).filter(img => parseBase64DataUrl(img))
+      const hasAnyImage = hasCover || innerImages.length > 0
+
+      // 行高
+      row.height = hasAnyImage ? IMAGE_ROW_HEIGHT : NORMAL_ROW_HEIGHT
+
+      // 基础列样式
       row.eachCell((cell, colNumber) => {
-        cell.alignment = { vertical: 'middle', wrapText: colNumber === 7 }
-        // 状态列颜色
-        if (colNumber === 9) {
-          if (data.status === '失败') {
-            cell.font = { color: { argb: 'FFE53935' } }
-          } else if (data.status === '完成') {
-            cell.font = { color: { argb: 'FF4CAF50' } }
+        if (colNumber <= baseColCount) {
+          cell.alignment = { vertical: 'middle', wrapText: colNumber === 7 }
+          // 状态列颜色
+          if (colNumber === 9) {
+            if (data.status === '失败') {
+              cell.font = { color: { argb: 'FFE53935' } }
+            } else if (data.status === '完成') {
+              cell.font = { color: { argb: 'FF4CAF50' } }
+            }
           }
+        } else {
+          // 图片列居中
+          cell.alignment = { vertical: 'middle', horizontal: 'center' }
         }
       })
+
+      // 嵌入封面图
+      if (hasCover) {
+        try {
+          const parsed = parseBase64DataUrl(data.coverImage)
+          if (parsed) {
+            const imageId = workbook.addImage({
+              base64: parsed.base64,
+              extension: parsed.extension,
+            })
+            sheet.addImage(imageId, {
+              tl: { col: baseColCount, row: excelRowNumber - 1 },
+              ext: { width: 120, height: 120 },
+              editAs: 'oneCell',
+            })
+          }
+        } catch (e) {
+          console.warn('嵌入封面图失败:', e)
+        }
+      }
+
+      // 嵌入内页图
+      for (let i = 0; i < Math.min(innerImages.length, maxInnerImages); i++) {
+        try {
+          const parsed = parseBase64DataUrl(innerImages[i])
+          if (parsed) {
+            const imageId = workbook.addImage({
+              base64: parsed.base64,
+              extension: parsed.extension,
+            })
+            sheet.addImage(imageId, {
+              tl: { col: baseColCount + 1 + i, row: excelRowNumber - 1 },
+              ext: { width: 120, height: 120 },
+              editAs: 'oneCell',
+            })
+          }
+        } catch (e) {
+          console.warn(`嵌入内页图${i + 1}失败:`, e)
+        }
+      }
 
       // 立即写入文件
       await flush()

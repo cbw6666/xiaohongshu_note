@@ -26,7 +26,7 @@ function formatCountdown(ms) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-export default function NoteCollector({ settings, shops = [], activeShopId, onGenerated }) {
+export default function NoteCollector({ settings, shops = [], activeShopId }) {
   // Excel 数据
   const [excelData, setExcelData] = useState(null) // { headers, columnMapping, rows }
   const [notes, setNotes] = useState([]) // 解析后的笔记列表
@@ -458,41 +458,6 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
     abortRef.current = null
   }, [notes, settings, globalSettings])
 
-  // ============ 导入到生成结果 ============
-  const handleImportToResults = useCallback(() => {
-    const validNotes = notes.filter(n => n.parseSuccess)
-    if (validNotes.length === 0) {
-      alert('没有可导入的笔记')
-      return
-    }
-
-    const converted = validNotes.map(n => {
-      const allImages = n.downloadedImages || []
-      // 第一张图作为封面，其余作为内页图
-      const coverImage = allImages[0] || null
-      const innerImages = allImages.slice(1)
-
-      return {
-        id: n.id,
-        shopName: n.shopName || globalSettings.shopName || '未设置',
-        accountName: n.accountName || globalSettings.accountName || '未设置',
-        productName: n.productName || globalSettings.productName || '未设置',
-        productItemId: n.productItemId || globalSettings.productItemId || '',
-        title: n.title,
-        content: n.content,
-        tags: n.tags.slice(0, globalSettings.maxTags).map(t => '#' + t).join(' '),
-        coverTemplateId: null,
-        coverTitle: '',
-        coverSubtitle: '',
-        coverImage, // 采集的封面原图 base64
-        innerImages,
-        source: 'collected',
-      }
-    })
-
-    onGenerated(converted)
-  }, [notes, globalSettings, onGenerated])
-
   // ============ 一键采集 + 处理 + 导出 Excel（流式写入） ============
   const [oneClickProgress, setOneClickProgress] = useState(null) // { phase, completed, total, text }
   const streamWriterRef = useRef(null)
@@ -747,12 +712,51 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
           } catch { /* 去 AI 味失败不影响 */ }
         }
 
-        // 写入 Excel
+        // 下载图片（带延迟）
+        let downloadedImages = []
+        if (result.images?.length > 0) {
+          setOneClickProgress(prev => ({
+            ...prev,
+            phase: '下载图片',
+            text: `[${batchIdx + 1}/${batches.length}批] 下载第 ${processedCount}/${total} 条的图片...`,
+          }))
+          for (let imgIdx = 0; imgIdx < result.images.length; imgIdx++) {
+            if (controller.signal.aborted) break
+            if (imgIdx > 0) {
+              try {
+                await randomDelay(speed.imgMin, speed.imgMax, controller.signal)
+              } catch (e) {
+                if (e.name === 'AbortError') break
+              }
+            }
+            const img = result.images[imgIdx]
+            const base64 = await downloadImage(img.proxyUrl, { signal: controller.signal, fallbackUrls: img.fallbackUrls })
+            if (base64) downloadedImages.push(base64)
+          }
+
+          // 图片去重
+          if (globalSettings.enableImageDedup && downloadedImages.length > 0) {
+            setOneClickProgress(prev => ({
+              ...prev,
+              phase: '图片去重',
+              text: `[${batchIdx + 1}/${batches.length}批] 去重第 ${processedCount}/${total} 条的图片...`,
+            }))
+            for (let imgIdx = 0; imgIdx < downloadedImages.length; imgIdx++) {
+              downloadedImages[imgIdx] = await deduplicateImage(downloadedImages[imgIdx])
+            }
+          }
+        }
+
+        // 写入 Excel（含图片）
         setOneClickProgress(prev => ({
           ...prev,
           phase: '写入',
           text: `[${batchIdx + 1}/${batches.length}批] 写入第 ${processedCount}/${total} 条...`,
         }))
+
+        // 第一张图作为封面，其余作为内页图
+        const coverImage = downloadedImages[0] || null
+        const innerImages = downloadedImages.slice(1)
 
         try {
           await writer.appendRow({
@@ -765,6 +769,8 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
             tags: finalTags.slice(0, globalSettings.maxTags),
             status: '完成',
             url: row.url,
+            coverImage,
+            innerImages,
           })
           successCount++
         } catch (err) {
@@ -788,7 +794,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
           originalContent: result.content || '',
           tags: finalTags,
           images: result.images || [],
-          downloadedImages: [],
+          downloadedImages,
           author: result.author || '',
           shopName: row.shopName || globalSettings.shopName,
           accountName: row.accountName || globalSettings.accountName,
@@ -799,7 +805,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
           parseError: '',
           partial: result.partial || false,
           rewritten: globalSettings.enableRewrite,
-          deduplicated: false,
+          deduplicated: globalSettings.enableImageDedup && downloadedImages.length > 0,
         }
         setNotes(prev => [...prev, note])
       }
@@ -1163,7 +1169,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
               {/* 阶段指示器 */}
               {oneClickProgress && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  {['采集', '改写', '去AI味', '写入'].map(phase => (
+                  {['采集', '改写', '去AI味', '下载图片', '图片去重', '写入'].map(phase => (
                     <span key={phase} style={{
                       padding: '2px 10px', borderRadius: 12, fontSize: 11,
                       background: oneClickProgress.phase === phase
@@ -1239,7 +1245,6 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
             </button>
           )}
           {notes.length > 0 && (
-            <>
               <button
                 className="btn-primary"
                 onClick={handleRewriteAll}
@@ -1248,15 +1253,6 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
               >
                 ✍️ 一键改写正文
               </button>
-              <button
-                className="btn-primary"
-                onClick={handleImportToResults}
-                disabled={isBusy || isPaused}
-                style={{ background: '#4caf50' }}
-              >
-                📥 导入到生成结果 ({successCount})
-              </button>
-            </>
           )}
           {(isBusy || isResting) && !isOneClick && (
             <button className="btn-danger btn-sm" onClick={handleStop}>
