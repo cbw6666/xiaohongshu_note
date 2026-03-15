@@ -47,17 +47,19 @@ ${originalContent}
 }
 
 /**
- * 改写标题
+ * 改写标题（增强版：结合正文和商品信息）
  */
-export async function rewriteTitle(originalTitle, settings) {
+export async function rewriteTitle(originalTitle, settings, { content = '', productName = '' } = {}) {
   const systemPrompt = `你是小红书标题改写专家。改写规则：
 1. 保留核心信息，换一种表达方式
-2. 标题控制在20字以内
+2. 标题必须控制在20字以内（汉字、标点符号、字母、数字各占1个位置，每个emoji占2个位置）
 3. 可以使用emoji增加吸引力
 4. 制造好奇心或紧迫感
-5. 直接输出新标题，不要任何前缀`
+5. 直接输出新标题，不要任何前缀、引号或解释`
 
-  const userPrompt = `改写这个标题：${originalTitle}`
+  let userPrompt = `改写这个标题：${originalTitle}`
+  if (productName) userPrompt += `\n商品名称：${productName}`
+  if (content) userPrompt += `\n正文摘要：${content.slice(0, 200)}`
 
   try {
     const messages = [

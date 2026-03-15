@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { parseExcel, generateTemplate } from '../utils/excelImporter.js'
 import { extractNoteId, parseNote, downloadImage, randomDelay, delay, SPEED_PRESETS, RateLimitManager } from '../services/noteParserService.js'
-import { rewriteContent } from '../services/rewriteService.js'
+import { rewriteContent, rewriteTitle } from '../services/rewriteService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { humanizeNote } from '../services/humanizerService.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
@@ -412,11 +412,23 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
         text: `正在改写第 ${i + 1}/${toRewrite.length} 条...`
       })
 
-      // 先改写
+      // 先改写正文
       let rewrittenContent = note.content
+      let rewrittenTitle = note.title
       if (globalSettings.enableRewrite) {
         const result = await rewriteContent(note.content, settings, globalSettings.rewritePrompt)
         if (result.success) rewrittenContent = result.content
+
+        // 改写标题
+        if (note.title) {
+          try {
+            const rt = await rewriteTitle(note.title, settings, {
+              content: rewrittenContent,
+              productName: note.productName || globalSettings.productName,
+            })
+            if (rt.success) rewrittenTitle = rt.title
+          } catch { /* 标题改写失败不影响主流程 */ }
+        }
       }
 
       // 再去 AI 味
@@ -424,15 +436,16 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
         try {
           const humanized = await humanizeNote(
             settings,
-            { title: note.title, content: rewrittenContent, tags: note.tags.map(t => '#' + t).join(' ') }
+            { title: rewrittenTitle, content: rewrittenContent, tags: note.tags.map(t => '#' + t).join(' ') }
           )
           if (humanized?.content) rewrittenContent = humanized.content
+          if (humanized?.title) rewrittenTitle = humanized.title
         } catch { /* 去 AI 味失败不影响主流程 */ }
       }
 
       setNotes(prev => prev.map(n =>
         n.id === note.id
-          ? { ...n, content: rewrittenContent, rewritten: true }
+          ? { ...n, content: rewrittenContent, title: rewrittenTitle, rewritten: true }
           : n
       ))
     }
@@ -704,6 +717,17 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onGe
             const rw = await rewriteContent(finalContent, settings, globalSettings.rewritePrompt)
             if (rw.success) finalContent = rw.content
           } catch { /* 改写失败不影响流程 */ }
+
+          // 改写标题
+          if (finalTitle) {
+            try {
+              const rt = await rewriteTitle(finalTitle, settings, {
+                content: finalContent,
+                productName: row.productName || globalSettings.productName,
+              })
+              if (rt.success) finalTitle = rt.title
+            } catch { /* 标题改写失败不影响流程 */ }
+          }
         }
 
         // 去 AI 味
