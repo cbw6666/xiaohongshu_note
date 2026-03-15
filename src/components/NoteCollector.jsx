@@ -847,6 +847,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             url: row.url,
             coverImage,
             innerImages,
+            contentFromTitle: result.contentFromTitle || false,
           })
           successCount++
         } catch (err) {

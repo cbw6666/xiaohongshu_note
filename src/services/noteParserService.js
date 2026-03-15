@@ -324,14 +324,17 @@ function parseFromMeta(html) {
   let cleanDesc = desc.replace(/#[^\s#]+/g, '').trim()
   const title = titleMatch?.[1]?.replace(' - 小红书', '')?.trim() || ''
 
+  let contentFromTitle = false
   if (!cleanDesc) {
     cleanDesc = title
+    contentFromTitle = true
   }
 
   return {
     success: true,
     title,
     content: cleanDesc,
+    contentFromTitle,
     tags: tagMatches.map(t => t.replace('#', '')),
     images: [],
     author: '',

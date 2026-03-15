@@ -151,8 +151,8 @@ export async function createStreamWriter() {
       const rawContent = data.content || ''
       const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
       let cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
-      // 正文为空时用标题兜底
-      if (!cleanContent) {
+      // 正文为空时 或 原始正文仅含标签(contentFromTitle) 时，强制正文 = 标题
+      if (!cleanContent || data.contentFromTitle) {
         cleanContent = data.title || ''
       }
 
