@@ -266,7 +266,7 @@ function parseInitialState(html, noteId) {
     return {
       success: true,
       title: noteData.title || '',
-      content: noteData.desc || '',
+      content: (noteData.desc || '').replace(/#[^\s#]+/g, '').trim(),
       tags,
       images,
       author: noteData.user?.nickname || '',

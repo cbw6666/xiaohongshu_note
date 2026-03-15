@@ -2,7 +2,7 @@
  * 流式 Excel 导出工具
  * 使用 File System Access API (showSaveFilePicker) 实现增量写入
  * 每处理完一条笔记就立即写入并保存，即使中途关闭浏览器已写入的数据也不会丢失
- * 支持嵌入笔记封面和内页图片
+ * 支持嵌入笔记封面和内页图片（内页图列数根据实际图片数量动态扩展）
  */
 import ExcelJS from 'exceljs'
 
@@ -30,17 +30,16 @@ function parseBase64DataUrl(dataUrl) {
   }
 }
 
-// 图片列的固定宽度和行高
-const IMAGE_COL_WIDTH = 18       // Excel 列宽单位（约 130px）
-const IMAGE_ROW_HEIGHT = 140     // 有图片行的行高（px → Excel 约 140 * 0.75 pt）
+// 图片列的固定宽度和行高（与 exportUtils.js 对齐）
+const IMAGE_COL_WIDTH = 22       // Excel 列宽单位
+const IMAGE_ROW_HEIGHT = 140     // 有图片行的行高（187 * 0.75 ≈ 140）
 const NORMAL_ROW_HEIGHT = 22
 
 /**
  * 创建流式 Excel 写入器
- * @param {object} options
- * @param {number} [options.maxInnerImages=5] - 最大内页图列数
+ * 内页图列数不再固定，而是根据每条笔记的实际图片数量动态扩展
  */
-export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
+export async function createStreamWriter() {
   // 检测浏览器是否支持 File System Access API
   if (!('showSaveFilePicker' in window)) {
     throw new Error('您的浏览器不支持 showSaveFilePicker API，请使用 Chrome 86+ 或 Edge 86+ 浏览器')
@@ -62,29 +61,9 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('笔记')
 
-  // 构建表头：基础列 + 笔记封面 + 内页图1~N
-  const baseHeaders = ['序号', '店铺', '账号', '商品名称', '商品ID', '笔记标题', '正文', '标签', '状态', '来源链接']
-  const imageHeaders = ['笔记封面']
-  for (let i = 1; i <= maxInnerImages; i++) {
-    imageHeaders.push(`内页图${i}`)
-  }
-  const headers = [...baseHeaders, ...imageHeaders]
-  const headerRow = sheet.addRow(headers)
-
-  // 表头样式
-  headerRow.height = 28
-  headerRow.eachCell((cell) => {
-    cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } }
-    cell.alignment = { vertical: 'middle', horizontal: 'center' }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF4757' } }
-    cell.border = {
-      bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
-    }
-  })
-
-  // 设置列宽：基础列 + 图片列
+  // 基础列（与 exportUtils.js 对齐，无序号列）
+  const baseHeaders = ['店铺', '账号', '商品名称', '商品ID', '笔记标题', '正文', '标签']
   const baseColWidths = [
-    { width: 6 },   // 序号
     { width: 14 },  // 店铺
     { width: 14 },  // 账号
     { width: 20 },  // 商品名称
@@ -92,17 +71,29 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
     { width: 28 },  // 笔记标题
     { width: 50 },  // 正文
     { width: 24 },  // 标签
-    { width: 10 },  // 状态
-    { width: 40 },  // 来源链接
   ]
-  const imageColWidths = []
-  for (let i = 0; i < 1 + maxInnerImages; i++) {
-    imageColWidths.push({ width: IMAGE_COL_WIDTH })
-  }
-  sheet.columns = [...baseColWidths, ...imageColWidths]
+  const baseColCount = baseHeaders.length // 7
 
-  // 基础列数（图片列从第 baseCount+1 列开始）
-  const baseColCount = baseHeaders.length
+  // 初始表头 = 基础列 + 笔记封面（暂不加内页图列，后续动态扩展）
+  const headers = [...baseHeaders, '笔记封面']
+  const headerRow = sheet.addRow(headers)
+
+  // 表头样式（与 exportUtils.js 对齐：浅灰背景 + 黑色文字）
+  headerRow.height = 28
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, size: 12 }
+    cell.alignment = { vertical: 'middle', horizontal: 'center' }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
+    cell.border = {
+      bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+    }
+  })
+
+  // 设置列宽：基础列 + 笔记封面
+  sheet.columns = [...baseColWidths, { width: IMAGE_COL_WIDTH }]
+
+  // 当前已有的内页图列数（动态扩展）
+  let currentMaxInnerCols = 0
 
   let rowIndex = 0
 
@@ -112,6 +103,27 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
     const writable = await fileHandle.createWritable()
     await writable.write(buffer)
     await writable.close()
+  }
+
+  /**
+   * 动态扩展内页图列：如果当前笔记的内页图数量超过已有列数，追加新列
+   */
+  function expandInnerImageColumns(needed) {
+    if (needed <= currentMaxInnerCols) return
+
+    const headerRowRef = sheet.getRow(1)
+    for (let i = currentMaxInnerCols + 1; i <= needed; i++) {
+      const colIdx = baseColCount + 1 + i // 基础列 + 笔记封面 + 内页图i
+      const cell = headerRowRef.getCell(colIdx)
+      cell.value = `内页图${i}`
+      cell.font = { bold: true, size: 12 }
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } } }
+      // 设置列宽
+      sheet.getColumn(colIdx).width = IMAGE_COL_WIDTH
+    }
+    currentMaxInnerCols = needed
   }
 
   // 先写入表头
@@ -129,21 +141,34 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
     async appendRow(data) {
       rowIndex++
 
-      // 基础数据列（图片列先留空）
+      // 有效内页图
+      const innerImages = (data.innerImages || []).filter(img => parseBase64DataUrl(img))
+
+      // 如果内页图数量超过当前列数，动态扩展
+      expandInnerImageColumns(innerImages.length)
+
+      // 正文去除 #话题标签，提取出的标签合并到标签列
+      const rawContent = data.content || ''
+      const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
+      const cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+
+      // 合并原有标签 + 正文提取标签（去重，最多10个）
+      const existingTags = (data.tags || []).map(t => t.replace(/^#/, ''))
+      const allTags = [...new Set([...existingTags, ...contentTags])].slice(0, 10)
+
+      // 基础数据列（无序号，与 exportUtils.js 对齐）
       const rowData = [
-        rowIndex,
         data.shopName || '',
         data.accountName || '',
         cleanProductName(data.productName || ''),
         data.productItemId || '',
         data.title || '',
-        data.content || '',
-        (data.tags || []).map(t => t.startsWith('#') ? t : '#' + t).join(' '),
-        data.status || '完成',
-        data.url || '',
+        cleanContent,
+        allTags.map(t => '#' + t).join(','),
       ]
-      // 图片列占位
-      for (let i = 0; i < 1 + maxInnerImages; i++) {
+      // 笔记封面 + 内页图占位
+      const totalImageCols = 1 + currentMaxInnerCols
+      for (let i = 0; i < totalImageCols; i++) {
         rowData.push('')
       }
 
@@ -152,24 +177,18 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
 
       // 判断是否有图片
       const hasCover = data.coverImage && parseBase64DataUrl(data.coverImage)
-      const innerImages = (data.innerImages || []).filter(img => parseBase64DataUrl(img))
       const hasAnyImage = hasCover || innerImages.length > 0
 
       // 行高
       row.height = hasAnyImage ? IMAGE_ROW_HEIGHT : NORMAL_ROW_HEIGHT
 
-      // 基础列样式
+      // 基础列样式（与 exportUtils.js 对齐）
       row.eachCell((cell, colNumber) => {
-        if (colNumber <= baseColCount) {
-          cell.alignment = { vertical: 'middle', wrapText: colNumber === 7 }
-          // 状态列颜色
-          if (colNumber === 9) {
-            if (data.status === '失败') {
-              cell.font = { color: { argb: 'FFE53935' } }
-            } else if (data.status === '完成') {
-              cell.font = { color: { argb: 'FF4CAF50' } }
-            }
-          }
+        if (colNumber === 6) {
+          // 正文列：自动换行 + 顶部对齐
+          cell.alignment = { wrapText: true, vertical: 'top' }
+        } else if (colNumber <= baseColCount) {
+          cell.alignment = { vertical: 'middle', wrapText: true }
         } else {
           // 图片列居中
           cell.alignment = { vertical: 'middle', horizontal: 'center' }
@@ -187,7 +206,7 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
             })
             sheet.addImage(imageId, {
               tl: { col: baseColCount, row: excelRowNumber - 1 },
-              ext: { width: 120, height: 120 },
+              ext: { width: 140, height: 187 },
               editAs: 'oneCell',
             })
           }
@@ -196,8 +215,8 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
         }
       }
 
-      // 嵌入内页图
-      for (let i = 0; i < Math.min(innerImages.length, maxInnerImages); i++) {
+      // 嵌入所有内页图（不再截断）
+      for (let i = 0; i < innerImages.length; i++) {
         try {
           const parsed = parseBase64DataUrl(innerImages[i])
           if (parsed) {
@@ -207,7 +226,7 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
             })
             sheet.addImage(imageId, {
               tl: { col: baseColCount + 1 + i, row: excelRowNumber - 1 },
-              ext: { width: 120, height: 120 },
+              ext: { width: 140, height: 187 },
               editAs: 'oneCell',
             })
           }
@@ -228,21 +247,24 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
     async updateRow(index, data) {
       const row = sheet.getRow(index + 1) // +1 因为表头占第一行
 
-      if (data.title !== undefined) row.getCell(6).value = data.title
-      if (data.content !== undefined) {
-        row.getCell(7).value = data.content
-        row.getCell(7).alignment = { vertical: 'middle', wrapText: true }
-      }
-      if (data.tags !== undefined) {
-        row.getCell(8).value = (data.tags || []).map(t => t.startsWith('#') ? t : '#' + t).join(' ')
-      }
-      if (data.status !== undefined) {
-        row.getCell(9).value = data.status
-        if (data.status === '失败') {
-          row.getCell(9).font = { color: { argb: 'FFE53935' } }
-        } else if (data.status === '完成') {
-          row.getCell(9).font = { color: { argb: 'FF4CAF50' } }
-        }
+      // 去序号后：标题=5, 正文=6, 标签=7
+      if (data.title !== undefined) row.getCell(5).value = data.title
+
+      // 正文去标签 + 提取标签合并到标签列
+      const rawContent = data.content !== undefined ? (data.content || '') : undefined
+      if (rawContent !== undefined) {
+        const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
+        const cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+        row.getCell(6).value = cleanContent
+        row.getCell(6).alignment = { wrapText: true, vertical: 'top' }
+
+        // 合并标签
+        const existingTags = (data.tags || []).map(t => t.replace(/^#/, ''))
+        const allTags = [...new Set([...existingTags, ...contentTags])].slice(0, 10)
+        row.getCell(7).value = allTags.map(t => '#' + t).join(',')
+      } else if (data.tags !== undefined) {
+        const tags = (data.tags || []).map(t => t.replace(/^#/, ''))
+        row.getCell(7).value = [...new Set(tags)].slice(0, 10).map(t => '#' + t).join(',')
       }
 
       await flush()
@@ -258,10 +280,10 @@ export async function createStreamWriter({ maxInnerImages = 5 } = {}) {
       // 空一行写汇总
       sheet.addRow([])
       const summaryRow = sheet.addRow([
-        '', '', '', '', '', '',
+        '', '', '', '', '',
         `采集完成 | 总计: ${summary.total} | 成功: ${summary.success} | 失败: ${summary.fail}`,
       ])
-      summaryRow.getCell(7).font = { bold: true, size: 11, color: { argb: 'FF1565C0' } }
+      summaryRow.getCell(6).font = { bold: true, size: 11, color: { argb: 'FF1565C0' } }
 
       await flush()
     },

@@ -108,14 +108,23 @@ export async function exportExcel(notes, onProgress, innerImagesMap) {
       }
     }
 
+    // 正文去除 #话题标签，提取出的标签合并到标签列
+    const rawContent = n.content || ''
+    const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
+    const cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+
+    // 合并原有标签 + 正文提取标签（去重，最多10个）
+    const existingTags = (n.tags || '').split(/\s+/).filter(Boolean).map(t => t.replace(/^#/, ''))
+    const allTags = [...new Set([...existingTags, ...contentTags])].slice(0, 10)
+
     const rowData = [
       n.shopName,
       n.accountName,
       cleanProductName(n.productName),
       extractProductId(n.productName, n.productItemId),
       n.title,
-      n.content,
-      (n.tags || '').split(/\s+/).filter(Boolean).slice(0, 10).join(','),
+      cleanContent,
+      allTags.map(t => '#' + t).join(','),
       '', // 封面图占位
     ]
     // 内页图占位
