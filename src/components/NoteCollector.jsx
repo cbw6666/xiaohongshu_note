@@ -414,35 +414,31 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
         text: `正在改写第 ${i + 1}/${toRewrite.length} 条...`
       })
 
-      // 先改写正文（标题兜底的跳过，避免 AI 乱编内容）
+      // 改写正文（始终执行，传入商品名确保不跑偏）
       let rewrittenContent = note.content
       let rewrittenTitle = note.title
       if (globalSettings.enableRewrite) {
-        if (!note.contentFromTitle) {
-          const result = await rewriteContent(note.content, settings, globalSettings.rewritePrompt)
+        try {
+          const result = await rewriteContent(note.content, settings, globalSettings.rewritePrompt, {
+            productName: note.productName || globalSettings.productName,
+          })
           if (result.success) rewrittenContent = result.content
-        }
+        } catch { /* 改写失败不影响主流程 */ }
 
-        // 改写标题（始终执行）
+        // 改写标题（始终执行，始终传商品名）
         if (note.title) {
           try {
             const rt = await rewriteTitle(note.title, settings, {
               content: rewrittenContent,
-              // contentFromTitle 时不传商品名，避免 AI 把标题往不相关商品方向靠
-              productName: note.contentFromTitle ? '' : (note.productName || globalSettings.productName),
+              productName: note.productName || globalSettings.productName,
             })
             if (rt.success) rewrittenTitle = rt.title
           } catch { /* 标题改写失败不影响主流程 */ }
         }
-
-        // 标题兜底时，正文用改写后的标题填充
-        if (note.contentFromTitle) {
-          rewrittenContent = rewrittenTitle
-        }
       }
 
-      // 再去 AI 味（标题兜底的跳过）
-      if (globalSettings.enableHumanize && !note.contentFromTitle) {
+      // 去 AI 味
+      if (globalSettings.enableHumanize) {
         try {
           const humanized = await humanizeNote(
             settings,
@@ -717,34 +713,28 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             text: `[${batchIdx + 1}/${batches.length}批] 改写第 ${processedCount}/${total} 条...`,
           }))
 
-          // 正文改写（标题兜底的跳过，避免 AI 乱编内容）
-          if (!result.contentFromTitle) {
-            try {
-              const rw = await rewriteContent(finalContent, settings, globalSettings.rewritePrompt)
-              if (rw.success) finalContent = rw.content
-            } catch { /* 改写失败不影响流程 */ }
-          }
+          // 正文改写（始终执行，传入商品名确保不跑偏）
+          try {
+            const rw = await rewriteContent(finalContent, settings, globalSettings.rewritePrompt, {
+              productName: row.productName || globalSettings.productName,
+            })
+            if (rw.success) finalContent = rw.content
+          } catch { /* 改写失败不影响流程 */ }
 
-          // 改写标题（始终执行）
+          // 改写标题（始终执行，始终传商品名）
           if (finalTitle) {
             try {
               const rt = await rewriteTitle(finalTitle, settings, {
                 content: finalContent,
-                // contentFromTitle 时不传商品名，避免 AI 把标题往不相关商品方向靠
-                productName: result.contentFromTitle ? '' : (row.productName || globalSettings.productName),
+                productName: row.productName || globalSettings.productName,
               })
               if (rt.success) finalTitle = rt.title
             } catch { /* 标题改写失败不影响流程 */ }
           }
-
-          // 标题兜底时，正文用改写后的标题填充
-          if (result.contentFromTitle) {
-            finalContent = finalTitle
-          }
         }
 
-        // 去 AI 味（标题兜底的跳过）
-        if (globalSettings.enableHumanize && settings?.apiKey && finalContent && !result.contentFromTitle) {
+        // 去 AI 味
+        if (globalSettings.enableHumanize && settings?.apiKey && finalContent) {
           setOneClickProgress(prev => ({
             ...prev,
             phase: '去AI味',

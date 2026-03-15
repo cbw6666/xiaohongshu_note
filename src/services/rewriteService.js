@@ -40,18 +40,20 @@ const DEFAULT_REWRITE_SYSTEM = `你是一个资深小红书文案改写专家。
 /**
  * 改写单条笔记正文
  */
-export async function rewriteContent(originalContent, settings, customPrompt = '') {
+export async function rewriteContent(originalContent, settings, customPrompt = '', { productName = '' } = {}) {
   const systemPrompt = customPrompt
     ? `${DEFAULT_REWRITE_SYSTEM}\n\n用户额外要求：${customPrompt}`
     : DEFAULT_REWRITE_SYSTEM
 
-  const userPrompt = `请改写以下小红书笔记正文：
+  let userPrompt = `请改写以下小红书笔记正文：
 
 ---
 ${originalContent}
----
-
-请直接输出改写后的正文：`
+---`
+  if (productName) {
+    userPrompt += `\n\n目标商品名称：${productName}\n请确保改写后的正文围绕该商品，保留原文风格和结构。`
+  }
+  userPrompt += `\n请直接输出改写后的正文：`
 
   try {
     const messages = [
