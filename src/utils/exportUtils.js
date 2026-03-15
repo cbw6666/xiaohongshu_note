@@ -111,7 +111,11 @@ export async function exportExcel(notes, onProgress, innerImagesMap) {
     // 正文去除 #话题标签，提取出的标签合并到标签列
     const rawContent = n.content || ''
     const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
-    const cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+    let cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+    // 正文为空时用标题兜底
+    if (!cleanContent) {
+      cleanContent = n.title || ''
+    }
 
     // 合并原有标签 + 正文提取标签（去重，最多10个）
     const existingTags = (n.tags || '').split(/\s+/).filter(Boolean).map(t => t.replace(/^#/, ''))

@@ -200,14 +200,20 @@ function parseInitialState(html, noteId) {
     const noteMap = state?.note?.noteDetailMap || state?.note?.noteDetail || {}
     let noteData = null
 
-    // 直接用 noteId 查找
+    // 直接用 noteId 精确查找
     if (noteMap[noteId]) {
       noteData = noteMap[noteId]?.note || noteMap[noteId]
     } else {
-      // 遍历查找第一个笔记
-      const keys = Object.keys(noteMap)
-      if (keys.length > 0) {
-        noteData = noteMap[keys[0]]?.note || noteMap[keys[0]]
+      // 模糊匹配：noteDetailMap 的 key 可能有前缀（如 "note_" + noteId）
+      const matchKey = Object.keys(noteMap).find(k => k.includes(noteId))
+      if (matchKey) {
+        noteData = noteMap[matchKey]?.note || noteMap[matchKey]
+      } else {
+        // 仅当 noteMap 中只有 1 条笔记时才取（避免取到不相关的推荐笔记）
+        const keys = Object.keys(noteMap)
+        if (keys.length === 1) {
+          noteData = noteMap[keys[0]]?.note || noteMap[keys[0]]
+        }
       }
     }
 
@@ -215,13 +221,22 @@ function parseInitialState(html, noteId) {
       return parseFromMeta(html)
     }
 
-    // 提取标签
+    // 提取标签（从 tagList + desc 中的 #话题 合并）
     const tags = []
     if (noteData.tagList && Array.isArray(noteData.tagList)) {
       noteData.tagList.forEach(t => {
         if (t.name) tags.push(t.name)
       })
     }
+    // 从 desc 中提取 #话题标签 并合并到 tags（去重）
+    const descText = noteData.desc || ''
+    const descTagMatches = descText.match(/#[^\s#]+/g) || []
+    descTagMatches.forEach(t => {
+      const tagName = t.replace(/^#/, '')
+      if (tagName && !tags.includes(tagName)) {
+        tags.push(tagName)
+      }
+    })
 
     // 提取图片
     const images = []
@@ -263,10 +278,16 @@ function parseInitialState(html, noteId) {
       })
     }
 
+    // 正文去标签后为空时，用标题兜底
+    let cleanContent = descText.replace(/#[^\s#]+/g, '').trim()
+    if (!cleanContent) {
+      cleanContent = noteData.title || ''
+    }
+
     return {
       success: true,
       title: noteData.title || '',
-      content: (noteData.desc || '').replace(/#[^\s#]+/g, '').trim(),
+      content: cleanContent,
       tags,
       images,
       author: noteData.user?.nickname || '',

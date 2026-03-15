@@ -150,7 +150,11 @@ export async function createStreamWriter() {
       // 正文去除 #话题标签，提取出的标签合并到标签列
       const rawContent = data.content || ''
       const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
-      const cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+      let cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+      // 正文为空时用标题兜底
+      if (!cleanContent) {
+        cleanContent = data.title || ''
+      }
 
       // 合并原有标签 + 正文提取标签（去重，最多10个）
       const existingTags = (data.tags || []).map(t => t.replace(/^#/, ''))
@@ -254,7 +258,11 @@ export async function createStreamWriter() {
       const rawContent = data.content !== undefined ? (data.content || '') : undefined
       if (rawContent !== undefined) {
         const contentTags = (rawContent.match(/#[^\s#]+/g) || []).map(t => t.replace(/^#/, ''))
-        const cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+        let cleanContent = rawContent.replace(/#[^\s#]+/g, '').trim()
+        // 正文为空时用标题兜底
+        if (!cleanContent) {
+          cleanContent = data.title || ''
+        }
         row.getCell(6).value = cleanContent
         row.getCell(6).alignment = { wrapText: true, vertical: 'top' }
 
