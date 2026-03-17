@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, callAI, buildAnalysisPrompt } from '../services/aiService.js'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import CoverCanvas from './CoverCanvas.jsx'
@@ -24,6 +24,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   // 内页图上传
   const innerImageInputRef = useRef(null)
   const [innerImageTarget, setInnerImageTarget] = useState(null) // 当前正在上传内页图的商品ID
+  const refEditorRef = useRef(null)
+  const promptEditorRef = useRef(null)
+  const coverEditorRef = useRef(null)
   // 内页图拖拽排序
   const [dragIndex, setDragIndex] = useState(null)
   const [dragProductId, setDragProductId] = useState(null)
@@ -308,6 +311,33 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setDragProductId(null)
   }
 
+  const scrollToEditor = (editorRef) => {
+    if (!editorRef?.current) return
+    editorRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+      inline: 'nearest',
+    })
+  }
+
+  useEffect(() => {
+    if (refEditing) {
+      scrollToEditor(refEditorRef)
+    }
+  }, [refEditing])
+
+  useEffect(() => {
+    if (promptEditing) {
+      scrollToEditor(promptEditorRef)
+    }
+  }, [promptEditing])
+
+  useEffect(() => {
+    if (coverEditing) {
+      scrollToEditor(coverEditorRef)
+    }
+  }, [coverEditing])
+
   return (
     <div className="panel">
       {/* 隐藏的内页图文件上传 input */}
@@ -324,7 +354,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
       {/* 爆文参考编辑面板 */}
       {refEditing && (
-        <div style={{
+        <div ref={refEditorRef} style={{
           background: '#fff8f0', border: '1px solid #ffcc80', borderRadius: 12,
           padding: 20, marginBottom: 16
         }}>
@@ -556,7 +586,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
       {/* 提示词编辑面板 */}
       {promptEditing && (
-        <div className="prompt-editor" style={{
+        <div ref={promptEditorRef} className="prompt-editor" style={{
           background: '#fafafa', border: '1px solid #e0e0e0', borderRadius: 12,
           padding: 20, marginBottom: 16
         }}>
@@ -592,7 +622,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
       {/* 封面自定义编辑面板 */}
       {coverEditing && (
-        <div style={{
+        <div ref={coverEditorRef} style={{
           background: '#f0f7ff', border: '1px solid #90caf9', borderRadius: 12,
           padding: 20, marginBottom: 16
         }}>
