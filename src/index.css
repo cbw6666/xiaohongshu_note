@@ -1473,6 +1473,13 @@ body {
   border-color: rgba(143, 173, 219, 0.2);
 }
 
+.item-card:hover,
+.shop-card:hover,
+.note-card:hover {
+  background: rgba(24, 41, 63, 0.86) !important;
+  border-color: rgba(169, 203, 255, 0.42) !important;
+}
+
 .shop-card.active,
 .chip.active {
   background: rgba(117, 167, 255, 0.2);
