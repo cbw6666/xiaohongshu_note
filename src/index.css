@@ -1263,3 +1263,293 @@ body {
     flex-wrap: wrap;
   }
 }
+
+/* === Premium Glass Theme Overrides === */
+:root {
+  --red: #7da2ff;
+  --red-dark: #648ef7;
+  --red-light: rgba(125, 162, 255, 0.18);
+  --bg: #0f1928;
+  --card: rgba(20, 34, 52, 0.62);
+  --text: #eef4ff;
+  --text-2: #b8c4db;
+  --text-3: #8fa0bf;
+  --border: rgba(160, 188, 230, 0.2);
+  --shadow: 0 16px 48px rgba(4, 10, 22, 0.45);
+}
+
+body {
+  font-family: "Avenir Next", "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background:
+    radial-gradient(1000px 500px at 10% -20%, rgba(108, 148, 255, 0.42), transparent 62%),
+    radial-gradient(860px 420px at 86% -14%, rgba(132, 188, 255, 0.28), transparent 65%),
+    linear-gradient(145deg, #0b1421 0%, #111f31 48%, #192b41 100%);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.app {
+  position: relative;
+  isolation: isolate;
+}
+
+.app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(600px 280px at 75% 15%, rgba(152, 199, 255, 0.14), transparent 62%),
+    radial-gradient(500px 260px at 15% 80%, rgba(114, 147, 236, 0.16), transparent 65%);
+  z-index: -1;
+}
+
+.app-header {
+  margin: 20px auto 10px;
+  max-width: 1280px;
+  width: calc(100% - 26px);
+  border: 1px solid rgba(190, 215, 255, 0.26);
+  border-radius: 22px;
+  background: linear-gradient(120deg, rgba(101, 151, 255, 0.44), rgba(101, 169, 255, 0.2));
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(12px) saturate(128%);
+  -webkit-backdrop-filter: blur(12px) saturate(128%);
+  text-align: left;
+  padding: 20px 24px;
+}
+
+.header-content h1 {
+  font-size: 30px;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+}
+
+.header-sub {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #d9e7ff;
+  opacity: 0.95;
+}
+
+.tab-nav {
+  margin: 10px auto 0;
+  max-width: 1280px;
+  width: calc(100% - 26px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(17, 30, 46, 0.68);
+  box-shadow: 0 12px 30px rgba(3, 8, 18, 0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  top: 10px;
+  overflow: hidden;
+}
+
+.tab-btn {
+  color: #afbed8;
+  border-bottom: none;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.tab-btn:hover {
+  color: #f3f7ff;
+  background: rgba(122, 164, 255, 0.16);
+}
+
+.tab-btn.active {
+  color: #f9fbff;
+  background: linear-gradient(120deg, rgba(122, 164, 255, 0.34), rgba(109, 193, 255, 0.2));
+  box-shadow: inset 0 -3px 0 rgba(178, 220, 255, 0.95);
+}
+
+.tab-badge {
+  background: linear-gradient(135deg, #8db7ff, #75e1ff);
+  color: #11243b;
+  font-weight: 800;
+}
+
+.main-content {
+  max-width: 1280px;
+  padding: 18px 12px 24px;
+}
+
+.panel {
+  background: linear-gradient(145deg, rgba(22, 37, 57, 0.76), rgba(17, 30, 46, 0.62));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(4, 10, 22, 0.42), inset 0 1px 0 rgba(240, 248, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.panel h2 {
+  color: #f2f6ff;
+  border-bottom-color: rgba(165, 188, 226, 0.18);
+}
+
+.alert {
+  margin: 10px auto 0;
+  max-width: 1280px;
+  width: calc(100% - 26px);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.alert-warn {
+  background: rgba(61, 49, 14, 0.45);
+  border-color: rgba(255, 209, 111, 0.36);
+  color: #ffe7a9;
+}
+
+.alert-info {
+  background: rgba(19, 49, 78, 0.5);
+  border-color: rgba(109, 177, 255, 0.38);
+  color: #cde6ff;
+}
+
+.form-group input,
+.form-group textarea,
+.form-group select,
+.filter-bar select,
+.manual-textarea,
+.rename-input {
+  background: rgba(11, 23, 38, 0.62);
+  border-color: rgba(162, 191, 233, 0.28);
+  color: #eef5ff;
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.form-group select:focus,
+.filter-bar select:focus,
+.manual-textarea:focus,
+.rename-input:focus {
+  border-color: #8bb7ff;
+  box-shadow: 0 0 0 3px rgba(127, 173, 255, 0.2);
+  background: rgba(14, 28, 44, 0.82);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #77a6ff, #62d6ff);
+  color: #12253b;
+  font-weight: 700;
+  border: 1px solid rgba(182, 226, 255, 0.75);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #89b5ff, #82e2ff);
+  box-shadow: 0 8px 20px rgba(100, 172, 255, 0.4);
+}
+
+.btn-secondary {
+  background: rgba(20, 34, 52, 0.58);
+  color: #dde8ff;
+  border-color: rgba(153, 183, 228, 0.32);
+}
+
+.btn-secondary:hover {
+  background: rgba(37, 56, 80, 0.8);
+}
+
+.btn-danger {
+  background: rgba(88, 32, 42, 0.48);
+  border-color: rgba(255, 142, 162, 0.4);
+  color: #ffd5dd;
+}
+
+.btn-danger:hover {
+  background: rgba(212, 68, 102, 0.92);
+}
+
+.item-card,
+.shop-card,
+.shop-detail-card,
+.note-card,
+.sync-product-item,
+.step-instructions {
+  background: rgba(13, 25, 40, 0.58);
+  border-color: rgba(143, 173, 219, 0.2);
+}
+
+.shop-card.active,
+.chip.active {
+  background: rgba(117, 167, 255, 0.2);
+  border-color: rgba(153, 206, 255, 0.62);
+  color: #dceeff;
+}
+
+.chip {
+  background: rgba(12, 25, 40, 0.6);
+}
+
+.chip:hover {
+  border-color: rgba(149, 197, 255, 0.7);
+}
+
+.note-card:hover {
+  box-shadow: 0 10px 26px rgba(6, 12, 24, 0.4);
+}
+
+.badge {
+  background: rgba(129, 171, 255, 0.24);
+  color: #cbe3ff;
+}
+
+.badge-alt {
+  background: rgba(124, 215, 176, 0.2);
+  color: #baf9e0;
+}
+
+.badge-shop {
+  background: rgba(255, 205, 143, 0.24);
+  color: #ffe0b6;
+}
+
+.progress-bar {
+  background: rgba(10, 20, 34, 0.82);
+  border: 1px solid rgba(155, 187, 235, 0.2);
+}
+
+.progress-fill {
+  background: linear-gradient(90deg, #75a9ff, #74dbff);
+}
+
+.progress-text {
+  color: #e9f3ff;
+}
+
+.empty-state,
+.app-footer,
+.hint,
+.item-meta,
+.shop-stats,
+.filter-count,
+.cover-label,
+.cover-desc {
+  color: var(--text-2);
+}
+
+.app-footer {
+  opacity: 0.9;
+}
+
+@media (max-width: 640px) {
+  .app-header,
+  .tab-nav,
+  .alert {
+    width: calc(100% - 16px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .app-header {
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .header-content h1 {
+    font-size: 22px;
+  }
+}
