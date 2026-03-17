@@ -1527,6 +1527,30 @@ body {
   color: #e9f3ff;
 }
 
+.prompt-editor {
+  background: linear-gradient(145deg, rgba(20, 34, 52, 0.9), rgba(15, 27, 42, 0.86)) !important;
+  border: 1px solid rgba(156, 187, 235, 0.34) !important;
+  color: #edf4ff;
+  box-shadow: 0 14px 30px rgba(3, 8, 18, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.prompt-editor h3,
+.prompt-editor label {
+  color: #f2f7ff;
+}
+
+.prompt-editor .hint {
+  color: #b9c8df;
+}
+
+.prompt-editor .hint code {
+  background: rgba(121, 164, 255, 0.18);
+  border: 1px solid rgba(163, 196, 255, 0.3);
+  color: #d8ebff;
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
 .empty-state,
 .app-footer,
 .hint,
