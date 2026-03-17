@@ -4,7 +4,6 @@ import ShopManager from './components/ShopManager.jsx'
 import ProductManager from './components/ProductManager.jsx'
 import AccountManager from './components/AccountManager.jsx'
 import BatchGenerator from './components/BatchGenerator.jsx'
-import NotePreview from './components/NotePreview.jsx'
 import CoverGallery from './components/CoverGallery.jsx'
 import NoteCollector from './components/NoteCollector.jsx'
 import { loadSettings, saveSettings, loadShops, saveShops, loadGenerated, saveGenerated } from './utils/storage.js'
@@ -13,7 +12,6 @@ const TABS = [
   { id: 'shops', label: '🏪 店铺管理' },
   { id: 'collect', label: '📥 笔记采集' },
   { id: 'generate', label: '🚀 批量生成' },
-  { id: 'results', label: '📋 生成结果' },
   { id: 'covers', label: '🎨 封面预览' },
   { id: 'settings', label: '⚙️ 设置' },
 ]
@@ -57,25 +55,10 @@ export default function App() {
 
   const handleGenerated = (newNotes) => {
     setGenerated(prev => [...newNotes, ...prev])
-    setActiveTab('results')
-  }
-
-  const handleUpdateNote = (noteId, updates) => {
-    setGenerated(prev => prev.map(n => n.id === noteId ? { ...n, ...updates } : n))
-  }
-
-  const handleDeleteNote = (noteId) => {
-    setGenerated(prev => prev.filter(n => n.id !== noteId))
-  }
-
-  const handleClearAll = () => {
-    if (confirm('确认清空所有已生成的笔记？')) {
-      setGenerated([])
-    }
+    setActiveTab('generate')
   }
 
   const configOk = settings.apiKey && settings.endpointId
-  const hasValidShop = shops.some(s => s.products.length > 0 && s.accounts.length > 0)
 
   return (
     <div className="app">
@@ -94,9 +77,6 @@ export default function App() {
             onClick={() => setActiveTab(tab.id)}
           >
             {tab.label}
-            {tab.id === 'results' && generated.length > 0 && (
-              <span className="tab-badge">{generated.length}</span>
-            )}
             {tab.id === 'shops' && shops.length > 0 && (
               <span className="tab-badge">{shops.length}</span>
             )}
@@ -128,7 +108,7 @@ export default function App() {
             ⚠️ <strong>{storageWarning.message}</strong>{' '}{storageWarning.advice}
           </span>
           <button
-            onClick={() => { setActiveTab('results'); setStorageWarning(null) }}
+            onClick={() => { setActiveTab('generate'); setStorageWarning(null) }}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none',
               background: '#e65100', color: '#fff', cursor: 'pointer',
@@ -186,22 +166,6 @@ export default function App() {
             shops={shops}
             activeShopId={activeShopId}
           />
-        )}
-
-        {activeTab === 'results' && (
-          <>
-            <NotePreview
-              notes={generated}
-              onUpdateNote={handleUpdateNote}
-              onDeleteNote={handleDeleteNote}
-              settings={settings}
-            />
-            {generated.length > 0 && (
-              <div className="panel">
-                <button className="btn-danger" onClick={handleClearAll}>🗑 清空全部笔记</button>
-              </div>
-            )}
-          </>
         )}
 
         {activeTab === 'covers' && (

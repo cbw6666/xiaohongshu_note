@@ -4,6 +4,8 @@ import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitleP
 import { humanizeNote } from '../services/humanizerService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
+import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
+import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
 import { renderCoverToBlob } from '../utils/coverRenderer.js'
 
 export default function BatchGenerator({ settings, shops, onGenerated, innerImagesMap }) {
@@ -347,6 +349,26 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
     abortRef.current = true
   }
 
+  const handleMergeExcels = async () => {
+    try {
+      const result = await mergeExcelFiles()
+      alert(`合并完成：共合并 ${result.fileCount} 个文件，输出 ${result.rowCount} 条记录`)
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      alert(`合并失败：${err.message || err}`)
+    }
+  }
+
+  const handleShuffleExcel = async () => {
+    try {
+      const result = await shuffleExcelRows()
+      alert(`打乱完成：文件 ${result.fileName} 已打乱，共 ${result.rowCount} 条记录`)
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      alert(`打乱失败：${err.message || err}`)
+    }
+  }
+
   return (
     <div className="panel">
       <h2>🚀 批量生成</h2>
@@ -602,6 +624,22 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
             ⏹ 停止生成
           </button>
         )}
+        <button
+          className="btn-secondary btn-large"
+          onClick={handleMergeExcels}
+          disabled={generating}
+          title="把多份批量生成/批量采集导出的 Excel 合并为一个文件"
+        >
+          🧩 合并 Excel
+        </button>
+        <button
+          className="btn-secondary btn-large"
+          onClick={handleShuffleExcel}
+          disabled={generating}
+          title="选择一个 Excel 文件并打乱数据行顺序"
+        >
+          🔀 打乱行顺序
+        </button>
       </div>
     </div>
   )

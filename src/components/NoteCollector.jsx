@@ -6,6 +6,8 @@ import { calcTitleLen, buildRetitlePrompt, callAI } from '../services/aiService.
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { humanizeNote } from '../services/humanizerService.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
+import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
+import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
 
 // 状态枚举
 const STATUS = {
@@ -931,6 +933,26 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
     setBatchInfo(null)
   }
 
+  const handleMergeExcels = async () => {
+    try {
+      const result = await mergeExcelFiles()
+      alert(`合并完成：共合并 ${result.fileCount} 个文件，输出 ${result.rowCount} 条记录`)
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      alert(`合并失败：${err.message || err}`)
+    }
+  }
+
+  const handleShuffleExcel = async () => {
+    try {
+      const result = await shuffleExcelRows()
+      alert(`打乱完成：文件 ${result.fileName} 已打乱，共 ${result.rowCount} 条记录`)
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      alert(`打乱失败：${err.message || err}`)
+    }
+  }
+
   // ============ 断点续采：从上次暂停位置继续 ============
   const handleResume = () => {
     handleFetchAll()
@@ -1277,6 +1299,25 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
           )}
         </div>
       )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <button
+          className="btn-secondary"
+          onClick={handleMergeExcels}
+          disabled={isBusy || isOneClick}
+          title="把多份批量生成/批量采集导出的 Excel 合并为一个文件"
+        >
+          🧩 合并 Excel 文件
+        </button>
+        <button
+          className="btn-secondary"
+          onClick={handleShuffleExcel}
+          disabled={isBusy || isOneClick}
+          title="选择一个 Excel 文件并打乱数据行顺序"
+        >
+          🔀 打乱行顺序
+        </button>
+      </div>
 
       {/* ===== 操作按钮 ===== */}
       {(excelData || notes.length > 0) && (
