@@ -239,6 +239,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     const files = Array.from(e.target.files || [])
     if (files.length === 0 || !innerImageTarget) return
 
+    // 按文件修改时间排序（新 → 旧，最近修改的排前面）
+    files.sort((a, b) => b.lastModified - a.lastModified)
+
     const readers = files.map(file => {
       return new Promise((resolve) => {
         const reader = new FileReader()

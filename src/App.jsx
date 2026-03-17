@@ -5,7 +5,6 @@ import ProductManager from './components/ProductManager.jsx'
 import AccountManager from './components/AccountManager.jsx'
 import BatchGenerator from './components/BatchGenerator.jsx'
 import NotePreview from './components/NotePreview.jsx'
-import ExportPanel from './components/ExportPanel.jsx'
 import CoverGallery from './components/CoverGallery.jsx'
 import NoteCollector from './components/NoteCollector.jsx'
 import { loadSettings, saveSettings, loadShops, saveShops, loadGenerated, saveGenerated } from './utils/storage.js'
@@ -198,12 +197,9 @@ export default function App() {
               settings={settings}
             />
             {generated.length > 0 && (
-              <>
-                <ExportPanel notes={generated} innerImagesMap={innerImagesMap} />
-                <div className="panel">
-                  <button className="btn-danger" onClick={handleClearAll}>🗑 清空全部笔记</button>
-                </div>
-              </>
+              <div className="panel">
+                <button className="btn-danger" onClick={handleClearAll}>🗑 清空全部笔记</button>
+              </div>
             )}
           </>
         )}

@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitlePrompt } from '../services/aiService.js'
+import { humanizeNote } from '../services/humanizerService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
+import { createStreamWriter } from '../utils/streamExportUtils.js'
+import { renderCoverToBlob } from '../utils/coverRenderer.js'
 
 export default function BatchGenerator({ settings, shops, onGenerated, innerImagesMap }) {
   const [generating, setGenerating] = useState(false)
@@ -91,12 +94,24 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
       return
     }
 
+    // 先让用户选择 Excel 保存位置
+    let writer
+    try {
+      writer = await createStreamWriter()
+    } catch (err) {
+      if (err.name === 'AbortError') return
+      alert('创建文件失败: ' + err.message)
+      return
+    }
+
     abortRef.current = false
     setGenerating(true)
     setProgress({ current: 0, total: totalNotes, text: '准备生成...' })
 
     const results = []
     let count = 0
+    let successCount = 0
+    let failCount = 0
 
     for (const shopId of selectedShops) {
       if (abortRef.current) break
@@ -129,6 +144,14 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
             const cleanName = (product.name || '').replace(/\n?\s*商品\s*ID\s*[:：]\s*[\s\S]*/i, '').replace(/\n?\s*预览\s*$/, '').trim()
             const itemId = product.productId || ((product.name || '').match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9]+)/i) || [])[1] || ''
 
+            let noteTitle = ''
+            let noteContent = ''
+            let noteTags = ''
+            let noteCoverTitle = ''
+            let noteCoverSubtitle = ''
+            let isError = false
+            let innerImageCount = 0
+
             try {
               const messages = buildNotePrompt(product, { noteIndex: i })
               const raw = await callAI(settings, messages)
@@ -137,7 +160,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
               // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
               let finalTitle = parsed.title
               const MAX_TITLE_LEN = 20
-              const SAFE_LIMIT = 10 // 安全上限，防止死循环
+              const SAFE_LIMIT = 10
               let retitleAttempt = 0
               while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < SAFE_LIMIT) {
                 retitleAttempt++
@@ -149,7 +172,6 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                   console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
                 }
               }
-              // 兜底：如果重试耗尽仍超标，强制截断确保不超过20字
               if (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN) {
                 let truncated = ''
                 let len = 0
@@ -162,73 +184,144 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 finalTitle = truncated
               }
 
-              // 对内页图进行去重处理，使同商品不同笔记的内页图 MD5 各不相同
-              const rawInnerImages = innerImagesMap?.[product.id] || []
-              let dedupedInnerImages = rawInnerImages
-              if (rawInnerImages.length > 0) {
+              noteTitle = finalTitle || `${cleanName}种草`
+              noteContent = parsed.content || raw
+              noteTags = parsed.tags || ''
+              noteCoverTitle = product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8)
+              noteCoverSubtitle = product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
+              successCount++
+
+              // 去AI味
+              if (settings.apiKey && noteContent) {
                 setProgress({
                   current: count,
                   total: totalNotes,
-                  text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 内页图去重...`,
+                  text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 去AI味...`,
                 })
-                dedupedInnerImages = []
-                for (const img of rawInnerImages) {
-                  dedupedInnerImages.push(await deduplicateImage(img))
+                try {
+                  const humanized = await humanizeNote(
+                    settings,
+                    { title: noteTitle, content: noteContent, tags: noteTags }
+                  )
+                  if (humanized?.content) noteContent = humanized.content
+                  if (humanized?.title) noteTitle = humanized.title
+                } catch (e) {
+                  console.warn('去AI味失败，使用原文:', e)
+                }
+
+                // 去AI味后再次校验标题字数
+                if (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN) {
+                  let retitleAttempt2 = 0
+                  while (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN && retitleAttempt2 < SAFE_LIMIT) {
+                    retitleAttempt2++
+                    try {
+                      const retitleMessages = buildRetitlePrompt(noteTitle, noteContent, product.name)
+                      const newTitle = (await callAI(settings, retitleMessages)).trim()
+                      if (newTitle) noteTitle = newTitle
+                    } catch (e) {
+                      console.warn(`去AI味后重新生成标题失败(第${retitleAttempt2}次):`, e)
+                    }
+                  }
+                  if (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN) {
+                    let truncated = ''
+                    let len = 0
+                    for (const ch of noteTitle) {
+                      const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
+                      if (len + chLen > MAX_TITLE_LEN) break
+                      truncated += ch
+                      len += chLen
+                    }
+                    noteTitle = truncated
+                  }
                 }
               }
-
-              results.push({
-                id: `${Date.now()}_${count}`,
-                shopId: shop.id,
-                shopName: shop.name,
-                accountId: account.id,
-                accountName: account.name,
-                productId: product.id,
-                productItemId: itemId,
-                productName: cleanName,
-                coverTemplateId,
-                title: finalTitle || `${cleanName}种草`,
-                content: parsed.content || raw,
-                tags: parsed.tags || '',
-                coverTitle: product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8),
-                coverSubtitle: product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || '',
-                innerImages: dedupedInnerImages,
-                raw,
-                createdAt: new Date().toISOString(),
-              })
             } catch (err) {
               console.error('生成失败:', err)
-              // 失败时也对内页图去重
-              const rawInnerImages = innerImagesMap?.[product.id] || []
-              let dedupedInnerImages = rawInnerImages
-              if (rawInnerImages.length > 0) {
-                dedupedInnerImages = []
-                for (const img of rawInnerImages) {
-                  dedupedInnerImages.push(await deduplicateImage(img))
-                }
-              }
-
-              results.push({
-                id: `${Date.now()}_${count}`,
-                shopId: shop.id,
-                shopName: shop.name,
-                accountId: account.id,
-                accountName: account.name,
-                productId: product.id,
-                productItemId: itemId,
-                productName: cleanName,
-                coverTemplateId,
-                title: `[生成失败] ${cleanName}`,
-                content: `错误: ${err.message}`,
-                tags: '',
-                coverTitle: product.customCoverTitle || cleanName.slice(0, 8),
-                coverSubtitle: product.customCoverSubtitle || '',
-                innerImages: dedupedInnerImages,
-                raw: '',
-                error: true,
-                createdAt: new Date().toISOString(),
-              })
+              noteTitle = `[生成失败] ${cleanName}`
+              noteContent = `错误: ${err.message}`
+              noteTags = ''
+              noteCoverTitle = product.customCoverTitle || cleanName.slice(0, 8)
+              noteCoverSubtitle = product.customCoverSubtitle || ''
+              isError = true
+              failCount++
             }
+
+            // --- 流式写入 Excel：渲染封面 + 内页图去重 + appendRow ---
+            setProgress({
+              current: count,
+              total: totalNotes,
+              text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 写入Excel...`,
+            })
+
+            // 渲染封面图
+            let coverImage = null
+            try {
+              const blob = await renderCoverToBlob(coverTemplateId, { title: noteCoverTitle, subtitle: noteCoverSubtitle }, count)
+              coverImage = await new Promise(resolve => {
+                const reader = new FileReader()
+                reader.onloadend = () => resolve(reader.result)
+                reader.readAsDataURL(blob)
+              })
+            } catch (e) {
+              console.warn('渲染封面失败:', e)
+            }
+
+            // 对内页图进行去重处理
+            const rawInnerImages = innerImagesMap?.[product.id] || []
+            let dedupedInnerImages = []
+            if (rawInnerImages.length > 0) {
+              setProgress({
+                current: count,
+                total: totalNotes,
+                text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 内页图去重...`,
+              })
+              for (const img of rawInnerImages) {
+                dedupedInnerImages.push(await deduplicateImage(img))
+              }
+            }
+            innerImageCount = dedupedInnerImages.length
+
+            // 写入 Excel
+            try {
+              await writer.appendRow({
+                shopName: shop.name,
+                accountName: account.name,
+                productName: cleanName,
+                productItemId: itemId,
+                title: noteTitle,
+                content: noteContent,
+                tags: noteTags.split(/\s+/).filter(Boolean),
+                coverImage,
+                innerImages: dedupedInnerImages,
+              })
+            } catch (e) {
+              console.error('写入Excel失败:', e)
+            }
+
+            // 释放图片引用，帮助 GC
+            coverImage = null
+            dedupedInnerImages = null
+
+            // 轻量数据 push 到 results（不含图片和 raw）
+            results.push({
+              id: `${Date.now()}_${count}`,
+              shopId: shop.id,
+              shopName: shop.name,
+              accountId: account.id,
+              accountName: account.name,
+              productId: product.id,
+              productItemId: itemId,
+              productName: cleanName,
+              coverTemplateId,
+              title: noteTitle,
+              content: noteContent,
+              tags: noteTags,
+              coverTitle: noteCoverTitle,
+              coverSubtitle: noteCoverSubtitle,
+              innerImageCount,
+              error: isError || undefined,
+              createdAt: new Date().toISOString(),
+            })
 
             if (count < totalNotes) {
               await new Promise(r => setTimeout(r, 800))
@@ -238,8 +331,15 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
       }
     }
 
+    // 写入汇总信息
+    try {
+      await writer.finalize({ total: count, success: successCount, fail: failCount })
+    } catch (e) {
+      console.error('写入汇总失败:', e)
+    }
+
     setGenerating(false)
-    setProgress({ current: totalNotes, total: totalNotes, text: '生成完成！' })
+    setProgress({ current: totalNotes, total: totalNotes, text: '生成完成！Excel 已自动保存' })
     onGenerated(results)
   }
 

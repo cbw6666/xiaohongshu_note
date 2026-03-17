@@ -47,16 +47,22 @@ export function loadGenerated() {
 }
 
 export function saveGenerated(notes) {
+  // 存储前剥离大字段，避免 base64 图片撑爆 localStorage
+  const lite = notes.map(n => {
+    const { innerImages, raw, downloadedImages, coverImage, ...rest } = n
+    return rest
+  })
+
   // 先尝试直接保存
   try {
-    localStorage.setItem(KEYS.GENERATED, JSON.stringify(notes))
+    localStorage.setItem(KEYS.GENERATED, JSON.stringify(lite))
     return { status: 'ok' }
   } catch {
     // 配额不足，尝试截断保存
   }
 
   // 逐步减少数据量直到能存下
-  let trimmed = notes
+  let trimmed = lite
   while (trimmed.length > 0) {
     trimmed = trimmed.slice(0, Math.max(1, Math.floor(trimmed.length * 0.8)))
     try {

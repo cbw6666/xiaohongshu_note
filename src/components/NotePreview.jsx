@@ -8,6 +8,9 @@ export default function NotePreview({ notes, onUpdateNote, onDeleteNote, setting
   const [expandedId, setExpandedId] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({})
+  const [page, setPage] = useState(0)
+
+  const PAGE_SIZE = 20
 
   // 去AI味相关状态
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -27,6 +30,13 @@ export default function NotePreview({ notes, onUpdateNote, onDeleteNote, setting
     if (filter.product && n.productName !== filter.product) return false
     return true
   })
+
+  // 筛选条件变化时重置页码
+  useEffect(() => { setPage(0) }, [filter.shop, filter.account, filter.product])
+
+  // 分页
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const pagedNotes = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
   const filteredIds = new Set(filtered.map(n => n.id))
   const selectedInView = [...selectedIds].filter(id => filteredIds.has(id))
@@ -204,9 +214,10 @@ export default function NotePreview({ notes, onUpdateNote, onDeleteNote, setting
       )}
 
       <div className="notes-grid">
-        {filtered.map((note, idx) => {
+        {pagedNotes.map((note, idx) => {
           const isHumanized = humanizedIds.has(note.id)
           const isHumanizingSingle = singleHumanizingId === note.id
+          const imgCount = note.innerImageCount || (note.innerImages || []).length
 
           return (
             <div key={note.id} className={`note-card ${note.error ? 'error' : ''} ${isHumanized ? 'humanized' : ''}`}>
@@ -290,14 +301,14 @@ export default function NotePreview({ notes, onUpdateNote, onDeleteNote, setting
                             <CoverCanvas
                               templateId={note.coverTemplateId}
                               data={{ title: note.coverTitle, subtitle: note.coverSubtitle }}
-                              colorIdx={idx}
+                              colorIdx={page * PAGE_SIZE + idx}
                               width={200}
                             />
                           )}
                         </div>
                       </div>
-                      {/* 内页图预览 */}
-                      {(note.innerImages || []).length > 0 && (
+                      {/* 内页图：有图片数据时显示缩略图，否则显示文字提示 */}
+                      {(note.innerImages || []).length > 0 ? (
                         <div style={{ marginTop: 12 }}>
                           <p style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>
                             {note.source === 'collected'
@@ -321,7 +332,15 @@ export default function NotePreview({ notes, onUpdateNote, onDeleteNote, setting
                             )}
                           </div>
                         </div>
-                      )}
+                      ) : imgCount > 0 ? (
+                        <div style={{
+                          marginTop: 12, padding: '8px 12px',
+                          background: '#f5f5f5', borderRadius: 6,
+                          fontSize: 12, color: '#888',
+                        }}>
+                          📎 已包含 {imgCount} 张内页图（已写入 Excel）
+                        </div>
+                      ) : null}
                       <div className="btn-row">
                         <button className="btn-sm" onClick={() => startEdit(note)}>编辑</button>
                         <button
@@ -341,6 +360,34 @@ export default function NotePreview({ notes, onUpdateNote, onDeleteNote, setting
           )
         })}
       </div>
+
+      {/* 分页控件 */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          gap: 12, margin: '20px 0', fontSize: 14,
+        }}>
+          <button
+            className="btn-secondary"
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            style={{ padding: '6px 14px', fontSize: 13 }}
+          >
+            ← 上一页
+          </button>
+          <span style={{ color: '#666' }}>
+            第 {page + 1} / {totalPages} 页（共 {filtered.length} 条）
+          </span>
+          <button
+            className="btn-secondary"
+            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+            style={{ padding: '6px 14px', fontSize: 13 }}
+          >
+            下一页 →
+          </button>
+        </div>
+      )}
 
       {notes.length === 0 && <p className="empty-state">还没有生成的笔记，点击「开始批量生成」</p>}
     </div>
