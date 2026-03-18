@@ -1357,6 +1357,211 @@ export const COVER_TEMPLATES = [
       }
     },
   },
+  // ===== 19. 笔记本横线紫圆高亮风 — 超粗黑体+淡紫圆高亮 =====
+  {
+    id: 'notebook_purple_circle',
+    name: '笔记本横线紫圆高亮风',
+    desc: '白底蓝色横线+顶部标注+超粗黑字+淡紫圆形色块高亮关键字',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 白色背景
+      ctx.fillStyle = '#FEFEFE'
+      ctx.fillRect(0, 0, w, h)
+
+      // 全页蓝色细横线
+      ctx.strokeStyle = 'rgba(180,200,230,0.35)'
+      ctx.lineWidth = 1.2
+      for (let y = 120; y < h; y += 48) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke()
+      }
+
+      // 顶部标注文字
+      ctx.fillStyle = '#C0C0C0'
+      ctx.font = `400 28px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText('Info Doc.', 60, 50)
+      ctx.fillText('Recyclable', 260, 50)
+
+      // 主标题 — 居中超粗黑字
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 128px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 175
+      const blockH = lines.length * lh
+      const startY = h * 0.40 - blockH / 2
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, w / 2, y)
+      })
+
+      // 第一行前两个字加淡紫色圆形高亮
+      if (lines.length >= 1 && lines[0].length >= 2) {
+        const firstLine = lines[0]
+        const char1 = firstLine[0]
+        const char2 = firstLine[1]
+        const fullW = ctx.measureText(firstLine).width
+        const c1W = ctx.measureText(char1).width
+        const c2W = ctx.measureText(char2).width
+
+        const lineStartX = w / 2 - fullW / 2
+
+        // 第一个字的圆
+        ctx.fillStyle = 'rgba(210,190,230,0.45)'
+        ctx.beginPath()
+        ctx.arc(lineStartX + c1W / 2, startY, 80, 0, Math.PI * 2)
+        ctx.fill()
+
+        // 第二个字的圆
+        ctx.fillStyle = 'rgba(210,190,230,0.45)'
+        ctx.beginPath()
+        ctx.arc(lineStartX + c1W + c2W / 2, startY, 80, 0, Math.PI * 2)
+        ctx.fill()
+
+        // 重绘这两个字确保在圆上方
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(firstLine, w / 2, startY)
+      }
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#999'
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `500 56px ${F}`)
+        ctx.fillText(data.subtitle, w / 2, startY + blockH + 50)
+      }
+    },
+  },
+
+  // ===== 20. 绿色马克笔涂抹高亮风 — 超粗黑体+绿色色块 =====
+  {
+    id: 'green_marker_highlight',
+    name: '绿色马克笔涂抹高亮风',
+    desc: '白灰纸质底+超粗黑字+绿色马克笔涂抹色块高亮部分行',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 浅灰白纸质背景
+      ctx.fillStyle = '#F5F3F0'
+      ctx.fillRect(0, 0, w, h)
+
+      // 微纹理
+      ctx.fillStyle = 'rgba(0,0,0,0.008)'
+      for (let i = 0; i < 200; i++) {
+        const px = Math.random() * w, py = Math.random() * h
+        ctx.fillRect(px, py, 2 + Math.random() * 3, 2 + Math.random() * 3)
+      }
+
+      // 主标题 — 左对齐超粗黑字
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 135px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 200)
+      const lh = 185
+      const blockH = lines.length * lh
+      const startY = h * 0.38 - blockH / 2
+      const leftX = 100
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+
+        // 第2行和第3行（索引1,2）加绿色马克笔涂抹高亮
+        if (i >= 1 && i <= 2) {
+          const tw = ctx.measureText(line).width
+          // 马克笔涂抹效果 — 多层半透明条叠加
+          ctx.fillStyle = 'rgba(130,220,170,0.55)'
+          const hlH = 100
+          const hlY = y - hlH / 2
+          // 主色块
+          ctx.fillRect(leftX - 12, hlY - 5, tw + 30, hlH + 10)
+          // 上下不规则边缘
+          ctx.fillStyle = 'rgba(130,220,170,0.3)'
+          ctx.fillRect(leftX - 8, hlY - 12, tw + 20, 10)
+          ctx.fillRect(leftX - 5, hlY + hlH + 2, tw + 15, 8)
+        }
+
+        ctx.fillStyle = '#1A1A1A'
+        ctx.fillText(line, leftX, y)
+      })
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#999'
+        ctx.textAlign = 'left'
+        fitFontSize(ctx, data.subtitle, w - 200, 56, 30, `500 56px ${F}`)
+        ctx.fillText(data.subtitle, leftX, startY + blockH + 55)
+      }
+    },
+  },
+
+  // ===== 21. 淡紫引号卡片风 — 超粗黑体+引号装饰+多色高亮 =====
+  {
+    id: 'lavender_quote_card',
+    name: '淡紫引号卡片风',
+    desc: '薰衣草淡紫底+左上引号装饰+超粗黑字+黄蓝色块关键词高亮',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+      // 薰衣草淡紫背景
+      ctx.fillStyle = '#EDE6F2'
+      ctx.fillRect(0, 0, w, h)
+
+      // 左上角大引号装饰
+      ctx.fillStyle = 'rgba(180,165,200,0.5)'
+      ctx.font = `900 220px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'
+      ctx.fillText('\u201C', 60, 50)
+
+      // 主标题 — 左对齐超粗黑字
+      ctx.fillStyle = '#2A2A2A'
+      ctx.font = `900 125px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - 220)
+      const lh = 175
+      const blockH = lines.length * lh
+      const startY = h * 0.36 - blockH / 2
+      const leftX = 100
+
+      lines.forEach((line, i) => {
+        const y = startY + i * lh
+
+        // 第二行最后2-3个字加黄色高亮色块
+        if (i === 1 && line.length >= 2) {
+          const hlChars = line.slice(-2)
+          const fullW = ctx.measureText(line).width
+          const hlW = ctx.measureText(hlChars).width
+          ctx.fillStyle = 'rgba(255,220,100,0.55)'
+          ctx.fillRect(leftX + fullW - hlW - 8, y - 55, hlW + 16, 110)
+        }
+
+        // 第三行前2-3个字加蓝色高亮色块
+        if (i === 2 && line.length >= 2) {
+          const hlChars = line.slice(0, 3)
+          const hlW = ctx.measureText(hlChars).width
+          ctx.fillStyle = 'rgba(170,210,235,0.55)'
+          ctx.fillRect(leftX - 8, y - 55, hlW + 16, 110)
+        }
+
+        ctx.fillStyle = '#2A2A2A'
+        ctx.fillText(line, leftX, y)
+      })
+
+      // 副标题
+      if (data.subtitle) {
+        ctx.fillStyle = '#8A7A9A'
+        ctx.textAlign = 'left'
+        fitFontSize(ctx, data.subtitle, w - 220, 56, 30, `500 56px ${F}`)
+        ctx.fillText(data.subtitle, leftX, startY + blockH + 55)
+      }
+
+      // 右下角短横线装饰
+      ctx.strokeStyle = 'rgba(100,80,120,0.4)'
+      ctx.lineWidth = 5
+      ctx.beginPath()
+      ctx.moveTo(w - 160, h - 120)
+      ctx.lineTo(w - 100, h - 120)
+      ctx.stroke()
+    },
+  },
 ]
 
 // === 辅助绘图函数 ===
