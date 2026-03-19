@@ -3,7 +3,7 @@
  * Canvas尺寸：1242 × 1660 (3:4)
  * 每个模板使用不同字体
  */
-import { FONTS } from '../utils/fontLoader.js'
+import { FONTS, getCachedImage } from '../utils/fontLoader.js'
 
 export const COVER_TEMPLATES = [
   // ===== 1. 格子速报风 — 潮酷黑体 =====
@@ -1560,6 +1560,199 @@ export const COVER_TEMPLATES = [
       ctx.moveTo(w - 160, h - 120)
       ctx.lineTo(w - 100, h - 120)
       ctx.stroke()
+    },
+  },
+
+  // ===== 22. 手持撕纸绿植风 =====
+  {
+    id: 'torn_paper_green',
+    name: '手持撕纸绿植风',
+    desc: '实拍手持撕纸绿植背景+白色粗标题+白色副标题（左对齐）',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+
+      // === 1. 绘制实拍背景图（放大+上移，纸片占比更大，手裁掉更多） ===
+      const bgImg = getCachedImage('torn_paper_green_v2')
+      if (bgImg) {
+        const imgW = bgImg.width
+        const imgH = bgImg.height
+        // 额外放大1.3倍，让纸片视觉更大
+        const baseScale = Math.max(w / imgW, h / imgH)
+        const scale = baseScale * 1.3
+        const drawW = imgW * scale
+        const drawH = imgH * scale
+        // 水平居中，垂直往上偏移（纸片上移，手被裁掉）
+        const offsetX = (w - drawW) / 2
+        const offsetY = -drawH * 0.12  // 上移12%，适度裁掉底部的手
+        ctx.drawImage(bgImg, offsetX, offsetY, drawW, drawH)
+      } else {
+        const bgGrad = ctx.createRadialGradient(w * 0.5, h * 0.3, 100, w * 0.5, h * 0.5, w)
+        bgGrad.addColorStop(0, '#7CB342')
+        bgGrad.addColorStop(0.5, '#4A8528')
+        bgGrad.addColorStop(1, '#2E5A18')
+        ctx.fillStyle = bgGrad
+        ctx.fillRect(0, 0, w, h)
+      }
+
+      // === 2. 文字阴影增强可读性（不使用遮罩） ===
+
+      // === 3. 主标题：白色超粗+阴影，左对齐，放在纸片上 ===
+      const marginLeft = w * 0.07
+      const titleY = h * 0.32
+      ctx.save()
+      ctx.shadowColor = 'rgba(0,0,0,0.15)'
+      ctx.shadowBlur = 6
+      ctx.shadowOffsetX = 1
+      ctx.shadowOffsetY = 1
+      ctx.fillStyle = '#2D5A27'
+      ctx.font = `900 110px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'
+      const maxTitleW = w * 0.86
+      const lines = smartWrap(ctx, data.title, maxTitleW)
+      const lh = 138
+      lines.forEach((line, i) => {
+        ctx.fillText(line, marginLeft, titleY + i * lh)
+      })
+
+      // === 4. 副标题：白色偏灰，左对齐，也在纸片区域内 ===
+      if (data.subtitle) {
+        const subY = titleY + lines.length * lh + 20
+        ctx.fillStyle = '#3A7233'
+        ctx.font = `700 68px ${F}`
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top'
+        const subLines = smartWrap(ctx, data.subtitle, maxTitleW)
+        const subLh = 90
+        subLines.forEach((line, i) => {
+          ctx.fillText(line, marginLeft, subY + i * subLh)
+        })
+      }
+      ctx.restore()
+    },
+  },
+
+  // ===== 23. 深红方格作业本风 =====
+  {
+    id: 'grid_notebook_red',
+    name: '深红方格作业本风',
+    desc: '暗红棕边框+白色方格纸+黑色粗体标题+红色副标题+钢笔装饰',
+    render: (ctx, w, h, data) => {
+      const F = FONTS.HEITI
+
+      // 暗红棕色底色（露出边框）
+      ctx.fillStyle = '#8B4D4D'
+      ctx.fillRect(0, 0, w, h)
+
+      // 边框装饰：深红圆点间隔排列
+      const dotR = 22
+      const dotGap = 100
+      ctx.fillStyle = '#6B3030'
+      // 上边
+      for (let x = dotGap; x < w - dotGap / 2; x += dotGap) {
+        ctx.beginPath(); ctx.arc(x, 35, dotR, 0, Math.PI * 2); ctx.fill()
+      }
+      // 下边
+      for (let x = dotGap; x < w - dotGap / 2; x += dotGap) {
+        ctx.beginPath(); ctx.arc(x, h - 35, dotR, 0, Math.PI * 2); ctx.fill()
+      }
+      // 左边
+      for (let y = dotGap; y < h - dotGap / 2; y += dotGap) {
+        ctx.beginPath(); ctx.arc(35, y, dotR, 0, Math.PI * 2); ctx.fill()
+      }
+      // 右边
+      for (let y = dotGap; y < h - dotGap / 2; y += dotGap) {
+        ctx.beginPath(); ctx.arc(w - 35, y, dotR, 0, Math.PI * 2); ctx.fill()
+      }
+
+      // 内部白色方格纸
+      const pad = 80
+      ctx.fillStyle = '#FAFAFA'
+      roundRect(ctx, pad, pad, w - pad * 2, h - pad * 2, 12)
+      ctx.fill()
+
+      // 方格线
+      const gs = 44
+      ctx.strokeStyle = 'rgba(200,200,210,0.4)'
+      ctx.lineWidth = 1
+      for (let x = pad; x < w - pad; x += gs) {
+        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h - pad); ctx.stroke()
+      }
+      for (let y = pad; y < h - pad; y += gs) {
+        ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke()
+      }
+
+      // 主标题 — 居中偏上，黑色超粗体
+      ctx.fillStyle = '#1A1A1A'
+      ctx.font = `900 108px ${F}`
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = smartWrap(ctx, data.title, w - pad * 2 - 120)
+      const lh = 135
+      const blockH = lines.length * lh
+      const startY = h * 0.28 - blockH / 2 + lh / 2
+      lines.forEach((line, i) => { ctx.fillText(line, w / 2, startY + i * lh) })
+
+      // 红色副标题条
+      if (data.subtitle) {
+        const subY = startY + blockH + 50
+        ctx.fillStyle = '#D44040'
+        ctx.font = `900 72px ${F}`
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        const subLines = smartWrap(ctx, data.subtitle, w - pad * 2 - 120)
+        const subLh = 95
+        subLines.forEach((line, i) => {
+          ctx.fillText(line, w / 2, subY + i * subLh)
+        })
+      }
+
+      // 右下角钢笔手绘装饰
+      ctx.save()
+      ctx.translate(w - 280, h - 350)
+      ctx.rotate(0.6)
+      // 笔杆
+      ctx.fillStyle = '#F5D76E'
+      ctx.beginPath()
+      ctx.moveTo(-12, -160); ctx.lineTo(12, -160); ctx.lineTo(14, 80); ctx.lineTo(-14, 80)
+      ctx.closePath(); ctx.fill()
+      // 笔杆条纹
+      ctx.fillStyle = '#E8C84A'
+      ctx.fillRect(-12, -100, 24, 8)
+      ctx.fillRect(-12, -70, 24, 8)
+      // 握笔处
+      ctx.fillStyle = '#D4A843'
+      ctx.beginPath()
+      ctx.moveTo(-14, 80); ctx.lineTo(14, 80); ctx.lineTo(10, 120); ctx.lineTo(-10, 120)
+      ctx.closePath(); ctx.fill()
+      // 笔尖
+      ctx.fillStyle = '#555'
+      ctx.beginPath()
+      ctx.moveTo(-10, 120); ctx.lineTo(10, 120); ctx.lineTo(0, 160)
+      ctx.closePath(); ctx.fill()
+      ctx.restore()
+
+      // 手部轮廓（简化版，模拟握笔手势）
+      ctx.save()
+      ctx.translate(w - 200, h - 220)
+      ctx.fillStyle = '#F5C6A0'
+      // 手掌
+      ctx.beginPath()
+      ctx.ellipse(0, 0, 90, 70, 0.2, 0, Math.PI * 2)
+      ctx.fill()
+      // 手指
+      ctx.beginPath()
+      ctx.ellipse(-50, -60, 25, 55, -0.3, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.ellipse(-10, -75, 22, 50, -0.1, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.ellipse(35, -65, 22, 45, 0.15, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+
+      // 左下角"电子版资料"标签
+      ctx.fillStyle = '#333'
+      ctx.font = `500 52px ${F}`
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
+      ctx.fillText('电子版资料', pad + 40, h - pad - 40)
     },
   },
 ]
