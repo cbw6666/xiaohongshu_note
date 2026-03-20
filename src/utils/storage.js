@@ -3,6 +3,7 @@ const KEYS = {
   SHOPS: 'rb_shops',
   GENERATED: 'rb_generated',
   STYLE_TEMPLATES: 'rb_style_templates',
+  FISSION: 'rb_fission',
 }
 
 export function loadSettings() {
@@ -94,5 +95,20 @@ export function saveStyleTemplates(templates) {
     localStorage.setItem(KEYS.STYLE_TEMPLATES, JSON.stringify(templates))
   } catch (e) {
     console.warn('保存风格模板失败:', e.message)
+  }
+}
+
+export function loadFissionData() {
+  try {
+    const raw = localStorage.getItem(KEYS.FISSION)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+export function saveFissionData(data) {
+  try {
+    localStorage.setItem(KEYS.FISSION, JSON.stringify(data))
+  } catch (e) {
+    console.warn('保存裂变数据失败:', e.message)
   }
 }

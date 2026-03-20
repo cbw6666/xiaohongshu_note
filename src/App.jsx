@@ -6,12 +6,14 @@ import AccountManager from './components/AccountManager.jsx'
 import BatchGenerator from './components/BatchGenerator.jsx'
 import CoverGallery from './components/CoverGallery.jsx'
 import NoteCollector from './components/NoteCollector.jsx'
+import TitleFission from './components/TitleFission.jsx'
 import { loadSettings, saveSettings, loadShops, saveShops, loadGenerated, saveGenerated } from './utils/storage.js'
 
 const TABS = [
   { id: 'shops', label: '🏪 店铺管理' },
   { id: 'collect', label: '📥 笔记采集' },
   { id: 'generate', label: '🚀 批量生成' },
+  { id: 'fission', label: '🔥 标题裂变' },
   { id: 'covers', label: '🎨 封面预览' },
   { id: 'settings', label: '⚙️ 设置' },
 ]
@@ -166,6 +168,10 @@ export default function App() {
             shops={shops}
             activeShopId={activeShopId}
           />
+        )}
+
+        {activeTab === 'fission' && (
+          <TitleFission settings={settings} />
         )}
 
         {activeTab === 'covers' && (
