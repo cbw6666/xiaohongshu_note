@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from 'react'
-import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, callAI, buildAnalysisPrompt } from '../services/aiService.js'
+import { callAI, buildAnalysisPrompt } from '../services/aiService.js'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import CoverCanvas from './CoverCanvas.jsx'
 
 export default function ProductManager({ shop, onUpdateShop, settings, innerImagesMap, setInnerImagesMap }) {
   const [promptEditing, setPromptEditing] = useState(null)
-  const [promptForm, setPromptForm] = useState({ customSystemPrompt: '', customUserPrompt: '' })
+  const [promptForm, setPromptForm] = useState({ customSystemPrompt: '' })
   // 爆文参考
   const [refEditing, setRefEditing] = useState(null)
   const [refForm, setRefForm] = useState({ text: '' })
@@ -44,7 +44,6 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setPromptEditing(p.id)
     setPromptForm({
       customSystemPrompt: p.customSystemPrompt || '',
-      customUserPrompt: p.customUserPrompt || '',
     })
   }
 
@@ -54,23 +53,15 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       products: products.map(p => p.id === promptEditing ? {
         ...p,
         customSystemPrompt: promptForm.customSystemPrompt.trim() || undefined,
-        customUserPrompt: promptForm.customUserPrompt.trim() || undefined,
+        customUserPrompt: undefined,
       } : p),
     })
     setPromptEditing(null)
-    setPromptForm({ customSystemPrompt: '', customUserPrompt: '' })
-  }
-
-  const handleResetPrompt = (field) => {
-    if (field === 'system') {
-      setPromptForm(prev => ({ ...prev, customSystemPrompt: DEFAULT_SYSTEM_PROMPT }))
-    } else {
-      setPromptForm(prev => ({ ...prev, customUserPrompt: DEFAULT_USER_PROMPT }))
-    }
+    setPromptForm({ customSystemPrompt: '' })
   }
 
   const handleClearPrompt = () => {
-    setPromptForm({ customSystemPrompt: '', customUserPrompt: '' })
+    setPromptForm({ customSystemPrompt: '' })
   }
 
   // 爆文参考管理
@@ -594,27 +585,39 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             ✏️ 自定义提示词 — {products.find(p => p.id === promptEditing)?.name}
           </h3>
           <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            留空则使用默认提示词。提示词中的 <code>{'{变量}'}</code> 会在生成时自动替换。
+            你填写的内容会作为<strong>补充要求</strong>追加在内置提示词之后（非替换），留空则仅使用内置提示词。支持变量：<code>{'{name}'}</code> <code>{'{description}'}</code> <code>{'{audience}'}</code> <code>{'{sellingPoints}'}</code>
           </p>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <label style={{ fontWeight: 600, fontSize: 13 }}>System Prompt（角色设定）</label>
-              <button className="btn-sm" onClick={() => handleResetPrompt('system')}
-                style={{ fontSize: 11, padding: '2px 8px' }}>填入默认值</button>
-            </div>
-            <textarea
-              value={promptForm.customSystemPrompt}
-              onChange={e => setPromptForm(prev => ({ ...prev, customSystemPrompt: e.target.value }))}
-              placeholder={DEFAULT_SYSTEM_PROMPT}
-              rows={8}
-              style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }}
-            />
+          <div style={{
+            background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 8,
+            padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#6d4c00', lineHeight: 1.8
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>💡 建议补充以下内容（内置已有标题公式、正文结构、合规要求、去AI味指令，无需重复）：</div>
+            <div>• <strong>发帖人设</strong> — 以什么身份发帖，如"在读研究生""3年设计师""宝妈"</div>
+            <div>• <strong>行业术语</strong> — 你的商品所在领域的专业词汇和圈内黑话</div>
+            <div>• <strong>必提/必避关键词</strong> — 正文中必须出现或必须回避的词</div>
+            <div>• <strong>转化话术偏好</strong> — 结尾引导购买的具体表达方式</div>
+            <div>• <strong>资料内容详情</strong> — 资料包含的具体内容、目录结构、页数等</div>
+            <div>• <strong>时效性信息</strong> — 当前热点、考试节点、季节等时效话题</div>
           </div>
 
+          <textarea
+            value={promptForm.customSystemPrompt}
+            onChange={e => setPromptForm(prev => ({ ...prev, customSystemPrompt: e.target.value }))}
+            placeholder={'把你的补充要求直接贴在这里，例如：\n\n请以"刚上岸的学长"身份来写，语气轻松有过来人可信度。\n正文中必须至少提到一次"思维导图"和"知识框架"。\n不要提及"xxx品牌"。\n结尾用"点击下方卡片直接拿走"引导，不要太硬推。\n\n资料包含：126页复试高频考点总结、50套往年真题解析、英语口语万能模板12套。\n分为"基础篇→进阶篇→冲刺篇"三部分，由985院校学长整理。\n现在是3月份考研出分季，可融入复试和调剂的时效话题。'}
+            rows={10}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}
+          />
+
+          <div style={{
+            background: '#f5f5f5', borderRadius: 8, padding: '8px 12px',
+            marginBottom: 12, fontSize: 11, color: '#888', lineHeight: 1.7
+          }}>
+            ℹ️ 内置已有设定（无需重复填写）：标题20字以内 · 正文300-500字 · 标签10个 · 封面主标题8-18字 · 8种标题公式自动轮换 · 10种笔记类型轮换 · 25种写法风格轮换 · 小红书合规违禁词 · 去AI味指令
+          </div>
           <div className="btn-row">
-            <button className="btn-primary" onClick={handleSavePrompt}>保存提示词</button>
-            <button className="btn-secondary" onClick={handleClearPrompt}>清空（恢复默认）</button>
+            <button className="btn-primary" onClick={handleSavePrompt}>保存补充提示词</button>
+            <button className="btn-secondary" onClick={handleClearPrompt}>清空（仅用内置）</button>
             <button className="btn-secondary" onClick={() => { setPromptEditing(null) }}>取消</button>
           </div>
         </div>

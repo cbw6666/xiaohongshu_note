@@ -28,7 +28,51 @@ export async function callAI(settings, messages) {
 // 默认的 system prompt 模板
 export const DEFAULT_SYSTEM_PROMPT = `你是一个资深小红书带货文案专家，擅长写虚拟资料类的种草笔记。
 要求：
-1. 标题要有吸引力，控制在20字以内（汉字、标点符号、字母、数字各占1个位置，每个emoji占2个位置），可以适当使用emoji
+1. 标题必须是爆款标题，控制在20字以内（汉字、标点符号、字母、数字各占1个位置，每个emoji占2个位置），可以适当使用emoji。标题必须使用以下爆款标题公式之一：
+
+--- 爆款标题公式库（无参考爆文/风格模板时必须严格使用）---
+标题必须紧密围绕商品名称和商品描述来写，禁止脱离商品随意发挥。
+
+公式A「身份标签+痛点+解决暗示」
+  结构：{目标人群身份词} + {该人群使用商品前的痛点} + {暗示该商品能解决}
+  句式要求：感叹句或悬念句
+
+公式B「数字钩子+商品价值预览」
+  结构：{从商品描述中提取的具体数字} + {商品核心价值的冲击性预告}
+  句式要求：感叹句或陈述句
+
+公式C「反问/悬念+情绪词」
+  结构：{围绕商品核心卖点设置反问或悬念} + {强情绪词}
+  句式要求：反问句或悬念句
+
+公式D「使用效果反差」
+  结构：{使用商品前的状态} vs {使用商品后的变化} + {偷跑/变强暗示}
+  句式要求：对比句或悬念句
+
+公式E「否定旧方案+商品替代」
+  结构：{否定目标人群当前的低效做法} + {引出商品作为更优解}
+  句式要求：否定句/祈使句 + 转折
+
+公式F「紧迫感+商品利益」
+  结构：{围绕商品的稀缺性/时效性制造紧迫} + {商品的最核心利益}
+  句式要求：祈使句或感叹句
+
+公式G「省略号留白+情绪悬念」
+  结构：{描述发现/使用商品后的某个感受} + {省略号留白}
+  句式要求：不完整句，用省略号结尾
+
+公式H「成本对比+商品性价比」
+  结构：{获取同类资源的高成本} vs {该商品} + {反差感}
+  句式要求：对比句
+
+标题公式使用要求：
+- 每篇标题必须明确使用上述公式之一，不允许写没有套路的平淡标题
+- 标题中必须包含商品相关的关键词（如商品名称、商品品类、商品核心主题词等），让用户一眼就知道这篇笔记在说什么商品
+- 标题中的身份标签、数字、痛点、效果等元素必须从商品信息中提取，不能凭空编造
+- 标题的情绪强度必须≥3分（5分制），要有明显的情绪感染力
+- 标题必须包含至少1个Power Word（如：救命、后悔、偷偷、真香、绝了、哭死、开挂、逆袭、封神、上岸、暴涨、神器、宝藏等）
+- 标题中鼓励使用emoji增加视觉冲击力（1-2个即可，不要过多）
+- 标题必须与正文内容主题一致
 2. 正文300-500字，必须遵循以下电子资料爆款正文结构：
    - 【开头钩子（前3行）】必须在前3行内抓住读者注意力，可选用以下钩子技巧之一（不要每篇都用同一种）：
      · 焦虑共鸣：抛出目标用户正在经历的焦虑场景，引发"说的就是我"的共鸣
@@ -68,7 +112,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是一个资深小红书带货文案专
    - "保证" → "个人体验是"/"身边朋友反馈"
    - "永久" → "长期"/"持续"
 12. 话题标签也必须合规，不能包含违禁词或打擦边球的标签
-13. 如果用户消息中包含了参考爆文或风格模板，标题必须优先模仿参考素材的标题风格和技巧，以上爆款标题公式仅作为兜底参考
+13. 标题公式优先级规则：如果用户消息中包含了参考爆文或风格模板，标题必须优先模仿参考素材的标题风格和技巧；如果没有参考爆文也没有风格模板，则必须严格使用第1条中的爆款标题公式库来生成标题，不允许写没有套路的平淡标题
 
 --- 去AI味专项指令（极其重要，必须严格遵守）---
 14. 绝对禁止使用以下AI高频连接词和表达：
@@ -159,6 +203,18 @@ const WRITING_STYLE_POOL = [
   '请用「理工科直男/直女」风格来写，用词朴素直接，少用感叹号和夸张表达，偏好用数据和对比说明问题，但偶尔冒出一句真情实感。',
 ]
 
+// 标题公式池（用于无爆文/无模板时的标题公式轮换）
+const TITLE_FORMULA_POOL = [
+  '本篇标题必须使用公式A「身份标签+痛点+解决暗示」：用目标人群身份词开头，点出痛点，暗示商品能解决。',
+  '本篇标题必须使用公式B「数字钩子+商品价值预览」：用从商品信息中提取的具体数字制造冲击力，预告商品核心价值。',
+  '本篇标题必须使用公式C「反问/悬念+情绪词」：围绕商品核心卖点设置反问或悬念，搭配强情绪词。',
+  '本篇标题必须使用公式D「使用效果反差」：展示使用商品前后的反差效果，营造偷跑/变强暗示。',
+  '本篇标题必须使用公式E「否定旧方案+商品替代」：先否定目标人群当前的低效做法，再引出商品作为更优解。',
+  '本篇标题必须使用公式F「紧迫感+商品利益」：围绕商品制造紧迫感，搭配商品的最核心利益。',
+  '本篇标题必须使用公式G「省略号留白+情绪悬念」：描述发现/使用商品后的感受，用省略号留白制造悬念。',
+  '本篇标题必须使用公式H「成本对比+商品性价比」：用获取同类资源的高成本与该商品做对比，制造反差感。',
+]
+
 // 构建爆文参考的 prompt 片段（支持三维轮换）
 function buildReferenceSection(references, styleTemplates, noteIndex) {
   const hasRefs = references && references.length > 0
@@ -173,7 +229,8 @@ function buildReferenceSection(references, styleTemplates, noteIndex) {
     if (noteIndex !== undefined) {
       const noteType = NOTE_TYPE_INSTRUCTIONS[noteIndex % NOTE_TYPE_INSTRUCTIONS.length]
       const writingStyle = WRITING_STYLE_POOL[noteIndex % WRITING_STYLE_POOL.length]
-      return `\n\n--- 本篇写作要求 ---\n${noteType.instruction}\n${writingStyle}\n重要：本篇的文案结构、开头方式、语气风格必须与其他篇明显不同，避免套路化和模板感。\n`
+      const titleFormula = TITLE_FORMULA_POOL[noteIndex % TITLE_FORMULA_POOL.length]
+      return `\n\n--- 本篇写作要求 ---\n${titleFormula}\n${noteType.instruction}\n${writingStyle}\n重要：本篇的文案结构、开头方式、语气风格必须与其他篇明显不同，避免套路化和模板感。\n`
     }
     return ''
   }
@@ -398,8 +455,13 @@ export function buildNotePrompt(product, options = {}) {
 
   const replaceVars = (tpl) => tpl.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '')
 
-  const systemContent = replaceVars(product.customSystemPrompt || DEFAULT_SYSTEM_PROMPT) + OUTPUT_FORMAT_INSTRUCTION
-  let userContent = replaceVars(product.customUserPrompt || DEFAULT_USER_PROMPT)
+  // 结合模式：用户补充内容追加在内置提示词之后（单字段，统一注入 system prompt）
+  const customPrompt = product.customSystemPrompt || product.customUserPrompt || ''
+  const systemContent = (customPrompt
+    ? DEFAULT_SYSTEM_PROMPT + `\n\n--- 用户补充要求 ---\n${replaceVars(customPrompt)}`
+    : DEFAULT_SYSTEM_PROMPT) + OUTPUT_FORMAT_INSTRUCTION
+
+  let userContent = replaceVars(DEFAULT_USER_PROMPT)
 
   // 追加爆文参考 + 风格模板（支持三维轮换）
   const refSection = buildReferenceSection(product.references, product.styleTemplates, noteIndex)

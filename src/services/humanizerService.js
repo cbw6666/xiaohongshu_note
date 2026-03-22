@@ -144,7 +144,20 @@ function parseHumanizeResponse(text) {
   }
 }
 
-export async function humanizeNote(settings, note) {
+export async function humanizeNote(settings, note, { skipTitle = false } = {}) {
+  if (skipTitle) {
+    // 跳过标题处理，只去AI化正文
+    const messages = buildHumanizePrompt('（跳过）', note.content)
+    const raw = await callAI(settings, messages)
+    const result = parseHumanizeResponse(raw)
+    if (!result.content) {
+      throw new Error('去痕结果解析失败，请重试')
+    }
+    return {
+      title: note.title,
+      content: result.content || note.content,
+    }
+  }
   const messages = buildHumanizePrompt(note.title, note.content)
   const raw = await callAI(settings, messages)
   const result = parseHumanizeResponse(raw)

@@ -27,6 +27,11 @@ export default function ShopManager({ shops, onUpdate, activeShopId, onSelectSho
     setRenameVal('')
   }
 
+  const handleResync = (shop) => {
+    onSelectShop(shop.id)
+    setShowSync(true)
+  }
+
   // 从千帆同步导入店铺
   const handleQianfanImport = (shopData) => {
     // 检查是否已存在同名/同ID店铺，存在则更新商品
@@ -36,8 +41,30 @@ export default function ShopManager({ shops, onUpdate, activeShopId, onSelectSho
     )
 
     if (existIdx >= 0) {
-      // 已存在 → 合并商品（用productId去重）
+      // 已存在 → 合并商品（用productId去重），同时更新已有商品基础信息
       const existing = shops[existIdx]
+      const freshMap = new Map(
+        (shopData.products || []).map(p => [p.productId, p])
+      )
+
+      // 更新已有商品的基础信息，保留所有自定义字段
+      let updatedCount = 0
+      const updatedExistingProducts = existing.products.map(p => {
+        const freshData = p.productId ? freshMap.get(p.productId) : null
+        if (freshData) {
+          const nameChanged = freshData.name && freshData.name !== p.name
+          const descChanged = freshData.description && freshData.description !== p.description
+          if (nameChanged || descChanged) updatedCount++
+          return {
+            ...p,
+            name: freshData.name || p.name,
+            description: freshData.description || p.description,
+          }
+        }
+        return p
+      })
+
+      // 新增商品
       const existingIds = new Set(existing.products.map(p => p.productId))
       const newProducts = (shopData.products || [])
         .filter(p => !existingIds.has(p.productId))
@@ -54,13 +81,19 @@ export default function ShopManager({ shops, onUpdate, activeShopId, onSelectSho
         ...existing,
         name: shopData.shopName || existing.name,
         shopId: shopData.shopId || existing.shopId,
-        products: [...existing.products, ...newProducts],
+        products: [...updatedExistingProducts, ...newProducts],
       }
 
       const updated = shops.map((s, i) => i === existIdx ? merged : s)
       onUpdate(updated)
       onSelectShop(merged.id)
-      alert(`已更新店铺「${merged.name}」，新增 ${newProducts.length} 个商品（跳过 ${shopData.products.length - newProducts.length} 个重复商品）`)
+
+      const parts = []
+      if (newProducts.length > 0) parts.push(`新增 ${newProducts.length} 个商品`)
+      if (updatedCount > 0) parts.push(`更新 ${updatedCount} 个商品信息`)
+      const skipped = (shopData.products || []).length - newProducts.length
+      if (skipped > 0 && updatedCount === 0) parts.push(`${skipped} 个商品无变化`)
+      alert(`已同步店铺「${merged.name}」：${parts.length > 0 ? parts.join('，') : '无变化'}`)
     } else {
       // 新店铺
       const newShop = {
@@ -143,6 +176,7 @@ export default function ShopManager({ shops, onUpdate, activeShopId, onSelectSho
               </div>
               {renaming !== shop.id && (
                 <div className="item-actions" onClick={e => e.stopPropagation()}>
+                  <button className="btn-sm" onClick={() => handleResync(shop)}>🔄 同步</button>
                   <button className="btn-sm" onClick={() => startRename(shop)}>重命名</button>
                   <button className="btn-sm btn-danger" onClick={() => handleDelete(shop.id)}>删除</button>
                 </div>

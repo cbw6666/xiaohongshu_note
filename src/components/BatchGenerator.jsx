@@ -201,7 +201,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
               noteCoverSubtitle = product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
               successCount++
 
-              // 去AI味
+              // 去AI味（跳过标题，只处理正文，保护爆款标题公式）
               if (settings.apiKey && noteContent) {
                 setProgress({
                   current: count,
@@ -211,38 +211,12 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 try {
                   const humanized = await humanizeNote(
                     settings,
-                    { title: noteTitle, content: noteContent, tags: noteTags }
+                    { title: noteTitle, content: noteContent, tags: noteTags },
+                    { skipTitle: true }
                   )
                   if (humanized?.content) noteContent = humanized.content
-                  if (humanized?.title) noteTitle = humanized.title
                 } catch (e) {
                   console.warn('去AI味失败，使用原文:', e)
-                }
-
-                // 去AI味后再次校验标题字数
-                if (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN) {
-                  let retitleAttempt2 = 0
-                  while (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN && retitleAttempt2 < SAFE_LIMIT) {
-                    retitleAttempt2++
-                    try {
-                      const retitleMessages = buildRetitlePrompt(noteTitle, noteContent, product.name)
-                      const newTitle = (await callAI(settings, retitleMessages)).trim()
-                      if (newTitle) noteTitle = newTitle
-                    } catch (e) {
-                      console.warn(`去AI味后重新生成标题失败(第${retitleAttempt2}次):`, e)
-                    }
-                  }
-                  if (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN) {
-                    let truncated = ''
-                    let len = 0
-                    for (const ch of noteTitle) {
-                      const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
-                      if (len + chLen > MAX_TITLE_LEN) break
-                      truncated += ch
-                      len += chLen
-                    }
-                    noteTitle = truncated
-                  }
                 }
               }
 
