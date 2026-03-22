@@ -169,6 +169,17 @@ export async function shuffleExcelRows() {
     throw new Error('当前浏览器不支持文件选择/保存 API，请使用 Chrome 或 Edge 最新版本')
   }
 
+  const date = new Date().toISOString().slice(0, 10)
+  const time = new Date().toTimeString().slice(0, 5).replace(':', '')
+  // 尽早在用户手势上下文中触发
+  const outputHandle = await window.showSaveFilePicker({
+    suggestedName: `小红书笔记_打乱_${date}_${time}.xlsx`,
+    types: [{
+      description: 'Excel 文件',
+      accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
+    }],
+  })
+
   const [sourceHandle] = await window.showOpenFilePicker({
     multiple: false,
     types: [{
@@ -297,17 +308,6 @@ export async function shuffleExcelRows() {
       zip.file(drawingFile.name, drawingXml)
     }
   }
-
-  // 弹出保存对话框
-  const date = new Date().toISOString().slice(0, 10)
-  const time = new Date().toTimeString().slice(0, 5).replace(':', '')
-  const outputHandle = await window.showSaveFilePicker({
-    suggestedName: `小红书笔记_打乱_${date}_${time}.xlsx`,
-    types: [{
-      description: 'Excel 文件',
-      accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
-    }],
-  })
 
   // 生成输出文件
   const outBlob = await zip.generateAsync({
