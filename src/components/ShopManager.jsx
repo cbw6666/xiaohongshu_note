@@ -11,11 +11,16 @@ const normalizeProductName = (value = '') => String(value)
   .replace(/\s+/g, ' ')
   .trim()
 
-const buildIncomingProduct = (product) => ({
-  productId: normalizeProductId(product?.productId || product?.id || ''),
-  name: normalizeProductName(product?.name || product?.title || ''),
-  description: String(product?.description || product?.desc || '').trim(),
-})
+const buildIncomingProduct = (product) => {
+  const rawName = String(product?.name || product?.title || '')
+  const nameIdMatch = rawName.match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9_-]+)/i)
+  const productId = normalizeProductId(product?.productId || product?.id || '') || (nameIdMatch ? nameIdMatch[1] : '')
+  return {
+    productId,
+    name: normalizeProductName(rawName),
+    description: String(product?.description || product?.desc || '').trim(),
+  }
+}
 
 const getProductMatchKey = (product) => {
   const productId = normalizeProductId(product?.productId || '')
