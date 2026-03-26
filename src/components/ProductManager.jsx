@@ -613,7 +613,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             background: '#f5f5f5', borderRadius: 8, padding: '8px 12px',
             marginBottom: 12, fontSize: 11, color: '#888', lineHeight: 1.7
           }}>
-            ℹ️ 内置已有设定（无需重复填写）：标题20字以内 · 正文300-500字 · 标签10个 · 封面主标题8-18字 · 8种标题公式自动轮换 · 10种笔记类型轮换 · 25种写法风格轮换 · 小红书合规违禁词 · 去AI味指令
+            ℹ️ 内置已有设定（无需重复填写）：标题20字以内 · 正文300-350字 · 标签10个 · 封面主标题8-18字 · 8种标题公式自动轮换 · 10种笔记类型轮换 · 25种写法风格轮换 · 小红书合规违禁词 · 去AI味指令
           </div>
           <div className="btn-row">
             <button className="btn-primary" onClick={handleSavePrompt}>保存补充提示词</button>
