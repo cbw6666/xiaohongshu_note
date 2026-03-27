@@ -3,6 +3,13 @@ import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitlePrompt } from '../services/aiService.js'
 import { humanizeNote } from '../services/humanizerService.js'
 import { perturbContent, perturbTitle } from '../services/textPerturbation.js'
+import {
+  buildSeoPlan,
+  buildSeoPromptSection,
+  buildRetitleSeoPromptSection,
+  enforceSeoResult,
+  getProtectedKeywords,
+} from '../services/seoService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
 import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
@@ -153,6 +160,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
             // 清理商品名称中可能混入的商品ID等信息
             const cleanName = (product.name || '').replace(/\n?\s*商品\s*ID\s*[:：]\s*[\s\S]*/i, '').replace(/\n?\s*预览\s*$/, '').trim()
             const itemId = product.productId || ((product.name || '').match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9]+)/i) || [])[1] || ''
+            const seoPlan = buildSeoPlan(product, i)
 
             let noteTitle = ''
             let noteContent = ''
@@ -164,6 +172,9 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
 
             try {
               const messages = buildNotePrompt(product, { noteIndex: i })
+              if (seoPlan) {
+                messages[1].content = `${messages[1].content}\n\n${buildSeoPromptSection(seoPlan)}`
+              }
               const raw = await callAI(settings, messages)
               const parsed = parseNoteResponse(raw)
 
@@ -176,6 +187,9 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 retitleAttempt++
                 try {
                   const retitleMessages = buildRetitlePrompt(finalTitle, parsed.content, product.name)
+                  if (seoPlan) {
+                    retitleMessages[1].content = `${retitleMessages[1].content}\n\n${buildRetitleSeoPromptSection(seoPlan)}`
+                  }
                   const newTitle = (await callAI(settings, retitleMessages)).trim()
                   if (newTitle) finalTitle = newTitle
                 } catch (e) {
@@ -221,8 +235,25 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
               }
 
               // 文本扰动（本地处理，不调用AI）— 进一步降低AI文本指纹
-              noteContent = perturbContent(noteContent)
-              noteTitle = perturbTitle(noteTitle)
+              const protectedKeywords = seoPlan ? getProtectedKeywords(seoPlan) : []
+              noteContent = perturbContent(noteContent, { protectedKeywords })
+              noteTitle = perturbTitle(noteTitle, { protectedKeywords })
+
+              if (seoPlan) {
+                const seoFixed = enforceSeoResult(
+                  {
+                    title: noteTitle,
+                    content: noteContent,
+                    tags: noteTags,
+                    coverTitle: noteCoverTitle,
+                  },
+                  seoPlan,
+                )
+                noteTitle = seoFixed.title || noteTitle
+                noteContent = seoFixed.content || noteContent
+                noteTags = seoFixed.tags || noteTags
+                noteCoverTitle = seoFixed.coverTitle || noteCoverTitle
+              }
 
               // 扰动后再次校验标题字数
               if (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN) {

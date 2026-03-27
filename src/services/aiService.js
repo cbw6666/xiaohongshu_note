@@ -457,9 +457,10 @@ export function buildNotePrompt(product, options = {}) {
 
   // 结合模式：用户补充内容追加在内置提示词之后（单字段，统一注入 system prompt）
   const customPrompt = product.customSystemPrompt || product.customUserPrompt || ''
-  const systemContent = (customPrompt
-    ? DEFAULT_SYSTEM_PROMPT + `\n\n--- 用户补充要求 ---\n${replaceVars(customPrompt)}`
-    : DEFAULT_SYSTEM_PROMPT) + OUTPUT_FORMAT_INSTRUCTION
+  const customPromptSection = customPrompt
+    ? `\n\n--- 用户补充要求（最高优先级）---\n以下补充要求与内置规则冲突时，以用户补充要求为准：\n${replaceVars(customPrompt)}`
+    : ''
+  const systemContent = `${DEFAULT_SYSTEM_PROMPT}${customPromptSection}${OUTPUT_FORMAT_INSTRUCTION}`
 
   let userContent = replaceVars(DEFAULT_USER_PROMPT)
 

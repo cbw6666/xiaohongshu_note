@@ -113,13 +113,44 @@ function applyParagraphSpacing(text) {
   return result.join('\n')
 }
 
+function protectKeywords(text, protectedKeywords = []) {
+  const keywords = Array.isArray(protectedKeywords)
+    ? protectedKeywords.map((item) => String(item || '').trim()).filter(Boolean)
+    : []
+  if (keywords.length === 0) return { text, restoreMap: [] }
+
+  const sortedKeywords = [...new Set(keywords)].sort((a, b) => b.length - a.length)
+  const restoreMap = []
+  let protectedText = text
+
+  sortedKeywords.forEach((keyword) => {
+    protectedText = protectedText.replaceAll(keyword, () => {
+      const token = `__SEO_LOCK_${restoreMap.length}__`
+      restoreMap.push({ token, keyword })
+      return token
+    })
+  })
+
+  return { text: protectedText, restoreMap }
+}
+
+function restoreKeywords(text, restoreMap = []) {
+  let restored = text
+  restoreMap.forEach(({ token, keyword }) => {
+    restored = restored.replaceAll(token, keyword)
+  })
+  return restored
+}
+
 /**
  * 对正文执行全部扰动
  */
-export function perturbContent(content) {
+export function perturbContent(content, options = {}) {
   if (!content) return content
   
-  let result = content
+  const { protectedKeywords = [] } = options
+  const protectedPayload = protectKeywords(content, protectedKeywords)
+  let result = protectedPayload.text
   
   // 1. 同义词替换（AI高频词 → 口语化）
   result = applySynonymReplacement(result, 0.7)
@@ -130,13 +161,16 @@ export function perturbContent(content) {
   // 3. 段间空行随机化
   result = applyParagraphSpacing(result)
   
-  return result
+  return restoreKeywords(result, protectedPayload.restoreMap)
 }
 
 /**
  * 对标题执行轻量扰动（标题只做同义词替换，不动标点）
  */
-export function perturbTitle(title) {
+export function perturbTitle(title, options = {}) {
   if (!title) return title
-  return applySynonymReplacement(title, 0.5)
+  const { protectedKeywords = [] } = options
+  const protectedPayload = protectKeywords(title, protectedKeywords)
+  const perturbed = applySynonymReplacement(protectedPayload.text, 0.5)
+  return restoreKeywords(perturbed, protectedPayload.restoreMap)
 }

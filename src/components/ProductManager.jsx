@@ -2,6 +2,65 @@ import { useEffect, useState, useRef } from 'react'
 import { callAI, buildAnalysisPrompt } from '../services/aiService.js'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import CoverCanvas from './CoverCanvas.jsx'
+import { keywordPoolToText, keywordTextToPool, normalizeSeoConfig } from '../services/seoService.js'
+
+const splitWords = (input = '') =>
+  String(input || '')
+    .split(/[\n,\s，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+const joinWords = (list = []) => (Array.isArray(list) ? list.join('\n') : '')
+
+const buildSeoForm = (product) => {
+  const seoConfig = normalizeSeoConfig(product?.seoConfig || {}, product)
+  return {
+    seedKeyword: seoConfig.seedKeyword || '',
+    coreKeyword: seoConfig.coreKeyword || '',
+    longTailKeywordsText: joinWords(seoConfig.longTailKeywords),
+    corePoolText: keywordPoolToText(seoConfig.keywordPools.core),
+    scenePoolText: keywordPoolToText(seoConfig.keywordPools.scene),
+    longTailPoolText: keywordPoolToText(seoConfig.keywordPools.longTail),
+    requiredTagsText: joinWords(seoConfig.requiredTags),
+    extendedTagsText: joinWords(seoConfig.extendedTags),
+    titleEnabled: seoConfig.enabledPositions.title,
+    introEnabled: seoConfig.enabledPositions.intro,
+    middleEnabled: seoConfig.enabledPositions.middle,
+    endingEnabled: seoConfig.enabledPositions.ending,
+    tagsEnabled: seoConfig.enabledPositions.tags,
+    titleMaxKeywordCount: seoConfig.antiStuffing.titleMaxKeywordCount,
+    bodyMaxRepeatPerWord: seoConfig.antiStuffing.bodyMaxRepeatPerWord,
+    minKeywordGapChars: seoConfig.antiStuffing.minKeywordGapChars,
+    noAdjacentDuplicate: seoConfig.antiStuffing.noAdjacentDuplicate,
+  }
+}
+
+const buildSeoPayload = (form) => ({
+  mode: 'direct',
+  seedKeyword: String(form.seedKeyword || '').trim(),
+  coreKeyword: String(form.coreKeyword || '').trim(),
+  longTailKeywords: splitWords(form.longTailKeywordsText),
+  keywordPools: {
+    core: keywordTextToPool(form.corePoolText),
+    scene: keywordTextToPool(form.scenePoolText),
+    longTail: keywordTextToPool(form.longTailPoolText),
+  },
+  requiredTags: splitWords(form.requiredTagsText),
+  extendedTags: splitWords(form.extendedTagsText),
+  enabledPositions: {
+    title: Boolean(form.titleEnabled),
+    intro: Boolean(form.introEnabled),
+    middle: Boolean(form.middleEnabled),
+    ending: Boolean(form.endingEnabled),
+    tags: Boolean(form.tagsEnabled),
+  },
+  antiStuffing: {
+    titleMaxKeywordCount: Number(form.titleMaxKeywordCount) || 2,
+    bodyMaxRepeatPerWord: Number(form.bodyMaxRepeatPerWord) || 3,
+    minKeywordGapChars: Number(form.minKeywordGapChars) || 12,
+    noAdjacentDuplicate: Boolean(form.noAdjacentDuplicate),
+  },
+})
 
 export default function ProductManager({ shop, onUpdateShop, settings, innerImagesMap, setInnerImagesMap }) {
   const [promptEditing, setPromptEditing] = useState(null)
@@ -21,12 +80,15 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   const [coverEditing, setCoverEditing] = useState(null)
   const [coverForm, setCoverForm] = useState({ coverTitle: '', coverSubtitle: '', coverTemplateId: '' })
   const [coverPreviewTplId, setCoverPreviewTplId] = useState(COVER_TEMPLATES[0]?.id || '')
+  const [seoEditing, setSeoEditing] = useState(null)
+  const [seoForm, setSeoForm] = useState(buildSeoForm({ seoConfig: {} }))
   // 内页图上传
   const innerImageInputRef = useRef(null)
   const [innerImageTarget, setInnerImageTarget] = useState(null) // 当前正在上传内页图的商品ID
   const refEditorRef = useRef(null)
   const promptEditorRef = useRef(null)
   const coverEditorRef = useRef(null)
+  const seoEditorRef = useRef(null)
   // 内页图拖拽排序
   const [dragIndex, setDragIndex] = useState(null)
   const [dragProductId, setDragProductId] = useState(null)
@@ -223,6 +285,50 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setCoverEditing(null)
   }
 
+  const handleEditSeo = (product) => {
+    setSeoEditing(product.id)
+    setSeoForm(buildSeoForm(product))
+  }
+
+  const handleSaveSeo = () => {
+    if (!seoEditing) return
+
+    const payload = buildSeoPayload(seoForm)
+    const normalizedPayload = normalizeSeoConfig(payload)
+    const hasAnyRule = Boolean(
+      normalizedPayload.seedKeyword ||
+      normalizedPayload.coreKeyword ||
+      normalizedPayload.longTailKeywords.length > 0 ||
+      normalizedPayload.requiredTags.length > 0 ||
+      normalizedPayload.extendedTags.length > 0 ||
+      normalizedPayload.keywordPools.core.length > 0 ||
+      normalizedPayload.keywordPools.scene.length > 0 ||
+      normalizedPayload.keywordPools.longTail.length > 0,
+    )
+
+    onUpdateShop({
+      ...shop,
+      products: products.map((p) => {
+        if (p.id !== seoEditing) return p
+        return {
+          ...p,
+          seoConfig: hasAnyRule ? normalizedPayload : undefined,
+        }
+      }),
+    })
+    setSeoEditing(null)
+  }
+
+  const handleClearSeo = () => {
+    if (!seoEditing) return
+    onUpdateShop({
+      ...shop,
+      products: products.map((p) => (p.id === seoEditing ? { ...p, seoConfig: undefined } : p)),
+    })
+    setSeoForm(buildSeoForm({ seoConfig: {} }))
+    setSeoEditing(null)
+  }
+
   // 内页图处理
   const handleInnerImageUpload = (productId) => {
     setInnerImageTarget(productId)
@@ -328,6 +434,12 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       scrollToEditor(coverEditorRef)
     }
   }, [coverEditing])
+
+  useEffect(() => {
+    if (seoEditing) {
+      scrollToEditor(seoEditorRef)
+    }
+  }, [seoEditing])
 
   return (
     <div className="panel">
@@ -624,6 +736,171 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       )}
 
       {/* 封面自定义编辑面板 */}
+      {seoEditing && (
+        <div ref={seoEditorRef} style={{
+          background: '#f4f8ff', border: '1px solid #b6d4fe', borderRadius: 12,
+          padding: 20, marginBottom: 16
+        }}>
+          <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
+            SEO设置 - {products.find(p => p.id === seoEditing)?.name}
+          </h3>
+          <p className="hint" style={{ marginBottom: 12, fontSize: 12 }}>
+            配置关键词分层、标签与反堆砌参数。生成时会自动注入，不改变整体文风。
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>基础词 seedKeyword</label>
+              <input
+                value={seoForm.seedKeyword}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, seedKeyword: e.target.value }))}
+                placeholder="例如：中考数学"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>核心词 coreKeyword</label>
+              <input
+                value={seoForm.coreKeyword}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, coreKeyword: e.target.value }))}
+                placeholder="可与基础词相同"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>长尾词 longTailKeywords（每行一个）</label>
+            <textarea
+              rows={4}
+              value={seoForm.longTailKeywordsText}
+              onChange={(e) => setSeoForm(prev => ({ ...prev, longTailKeywordsText: e.target.value }))}
+              placeholder={'中考数学提分\n中考数学资料\n中考数学压轴题'}
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>词池 core（词|权重|锁定）</label>
+              <textarea
+                rows={5}
+                value={seoForm.corePoolText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, corePoolText: e.target.value }))}
+                placeholder={'中考数学|3|1\n中考数学资料|2|0'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>词池 scene（词|权重|锁定）</label>
+              <textarea
+                rows={5}
+                value={seoForm.scenePoolText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, scenePoolText: e.target.value }))}
+                placeholder={'初三复习|1.5|0\n中考冲刺|1.2|0'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>词池 longTail（词|权重|锁定）</label>
+              <textarea
+                rows={5}
+                value={seoForm.longTailPoolText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, longTailPoolText: e.target.value }))}
+                placeholder={'中考数学压轴题讲解|1.4|0\n中考数学错题整理|1.2|0'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>必选标签 requiredTags</label>
+              <textarea
+                rows={3}
+                value={seoForm.requiredTagsText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, requiredTagsText: e.target.value }))}
+                placeholder={'中考数学\n学霸笔记'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>扩展标签 extendedTags</label>
+              <textarea
+                rows={3}
+                value={seoForm.extendedTagsText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, extendedTagsText: e.target.value }))}
+                placeholder={'初三复习\n中考冲刺'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>注入位置</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12 }}>
+              <label><input type="checkbox" checked={seoForm.titleEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, titleEnabled: e.target.checked }))} /> 标题</label>
+              <label><input type="checkbox" checked={seoForm.introEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, introEnabled: e.target.checked }))} /> 正文开头</label>
+              <label><input type="checkbox" checked={seoForm.middleEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, middleEnabled: e.target.checked }))} /> 正文中段</label>
+              <label><input type="checkbox" checked={seoForm.endingEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, endingEnabled: e.target.checked }))} /> 正文结尾</label>
+              <label><input type="checkbox" checked={seoForm.tagsEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, tagsEnabled: e.target.checked }))} /> 话题标签</label>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))', gap: 10, marginBottom: 12 }}>
+            <label style={{ fontSize: 12 }}>
+              标题最多关键词
+              <input
+                type="number"
+                min={1}
+                max={4}
+                value={seoForm.titleMaxKeywordCount}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, titleMaxKeywordCount: e.target.value }))}
+                style={{ width: '100%', marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+              />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              正文单词最大重复
+              <input
+                type="number"
+                min={1}
+                max={6}
+                value={seoForm.bodyMaxRepeatPerWord}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, bodyMaxRepeatPerWord: e.target.value }))}
+                style={{ width: '100%', marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+              />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              同词最小间隔
+              <input
+                type="number"
+                min={0}
+                max={80}
+                value={seoForm.minKeywordGapChars}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, minKeywordGapChars: e.target.value }))}
+                style={{ width: '100%', marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+              />
+            </label>
+            <label style={{ fontSize: 12, display: 'flex', alignItems: 'end' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
+                <input
+                  type="checkbox"
+                  checked={seoForm.noAdjacentDuplicate}
+                  onChange={(e) => setSeoForm(prev => ({ ...prev, noAdjacentDuplicate: e.target.checked }))}
+                />
+                禁止相邻重复
+              </span>
+            </label>
+          </div>
+
+          <div className="btn-row">
+            <button className="btn-primary" onClick={handleSaveSeo}>保存SEO设置</button>
+            <button className="btn-danger" onClick={handleClearSeo}>清空SEO设置</button>
+            <button className="btn-secondary" onClick={() => setSeoEditing(null)}>取消</button>
+          </div>
+        </div>
+      )}
+
       {coverEditing && (
         <div ref={coverEditorRef} style={{
           background: '#f0f7ff', border: '1px solid #90caf9', borderRadius: 12,
@@ -775,6 +1052,17 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             const templateCount = (p.styleTemplates || []).length
             const enabledTemplateCount = (p.styleTemplates || []).filter(t => t.enabled !== false).length
             const hasCover = p.customCoverTitle || p.customCoverSubtitle
+            const normalizedSeo = normalizeSeoConfig(p.seoConfig || {}, p)
+            const hasSeoConfig = Boolean(
+              normalizedSeo.seedKeyword ||
+              normalizedSeo.coreKeyword ||
+              normalizedSeo.longTailKeywords.length > 0 ||
+              normalizedSeo.requiredTags.length > 0 ||
+              normalizedSeo.extendedTags.length > 0 ||
+              normalizedSeo.keywordPools.core.length > 0 ||
+              normalizedSeo.keywordPools.scene.length > 0 ||
+              normalizedSeo.keywordPools.longTail.length > 0
+            )
             const innerImages = innerImagesMap[p.id] || []
             return (
               <div key={p.id} className="item-card">
@@ -805,6 +1093,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                     {(p.customSystemPrompt || p.customUserPrompt) && (
                       <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>📝 已定制提示词</span>
                     )}
+                    {hasSeoConfig && (
+                      <span style={{ marginLeft: 6, color: '#0369a1', fontWeight: 600 }}>🔎 SEO已配置</span>
+                    )}
                     {innerImages.length > 0 && (
                       <span style={{ marginLeft: 6, color: '#00897b', fontWeight: 600 }}>🖼️ {innerImages.length}张内页图</span>
                     )}
@@ -826,6 +1117,10 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                   <button className="btn-sm" onClick={() => handleEditPrompt(p)}
                     style={{ background: (p.customSystemPrompt || p.customUserPrompt) ? '#fff3e0' : undefined }}>
                     {(p.customSystemPrompt || p.customUserPrompt) ? '编辑提示词' : '定制提示词'}
+                  </button>
+                  <button className="btn-sm" onClick={() => handleEditSeo(p)}
+                    style={{ background: hasSeoConfig ? '#e0f2fe' : undefined }}>
+                    {hasSeoConfig ? '编辑SEO' : 'SEO设置'}
                   </button>
                   <button className="btn-sm btn-danger" onClick={() => handleDelete(p.id)}>删除</button>
                 </div>
