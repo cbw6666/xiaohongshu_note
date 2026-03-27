@@ -3,7 +3,8 @@
  * 通过 Canvas 对图片进行多维度微调处理，使输出图片的 MD5/pHash/CNN 特征与原图不同
  * 
  * 策略：对检测有效但肉眼不敏感的处理（裁剪/缩放/旋转/JPEG重压缩）保持力度
- *       纯粹影响视觉的处理（边框/emoji/色膜/暗角/色偏）大幅降低
+ *       纯粹影响视觉的处理（emoji/色膜/暗角/色偏）大幅降低
+ *       彩色相框边框（HSL约束随机颜色，图片短边3%~5%宽度），去重效果强且视觉自然
  */
 
 // ============ 工具函数 ============
@@ -75,37 +76,18 @@ function hslToRgb(h, s, l) {
 }
 
 /**
- * 从图片边缘采样获取平均颜色（用于边框颜色）
+ * 随机生成一个"保证好看"的边框颜色（HSL 约束随机）
+ * H（色相）：0~360 全范围 → 颜色多样
+ * S（饱和度）：0.55~0.75 → 不灰不艳
+ * L（亮度）：0.42~0.58 → 不暗不亮
+ * @returns {{ r: number, g: number, b: number }}
  */
-function sampleEdgeColor(imageData, w, h) {
-  const data = imageData.data
-  let rSum = 0, gSum = 0, bSum = 0, count = 0
-
-  const samplePixel = (x, y) => {
-    const idx = (y * w + x) * 4
-    rSum += data[idx]
-    gSum += data[idx + 1]
-    bSum += data[idx + 2]
-    count++
-  }
-
-  // 采样四条边（每隔几个像素采一次，避免全部遍历太慢）
-  const step = Math.max(1, Math.floor(Math.max(w, h) / 50))
-  for (let x = 0; x < w; x += step) {
-    samplePixel(x, 0)          // 上边
-    samplePixel(x, h - 1)      // 下边
-  }
-  for (let y = 0; y < h; y += step) {
-    samplePixel(0, y)          // 左边
-    samplePixel(w - 1, y)      // 右边
-  }
-
-  if (count === 0) return { r: 255, g: 255, b: 255 }
-  return {
-    r: Math.round(rSum / count),
-    g: Math.round(gSum / count),
-    b: Math.round(bSum / count),
-  }
+export function randomBorderColor() {
+  const h = Math.random() * 360
+  const s = randomRange(0.55, 0.75)
+  const l = randomRange(0.42, 0.58)
+  const [r, g, b] = hslToRgb(h, s, l)
+  return { r, g, b }
 }
 
 // 预设 emoji 池（常见装饰类，不会显得突兀）
@@ -150,7 +132,8 @@ export async function deduplicateImage(base64Src, options = {}) {
     saturationShift = randomRange(-0.05, 0.05),
     colorTempR = randomInt(-3, 3),
     colorTempB = randomInt(-3, 3),
-    borderWidth = randomInt(0, 3),
+    // 彩色相框边框：颜色可由外部传入（同一篇笔记共享），宽度按图片短边 3%~5%
+    borderColor = null,
     overlayOpacity = randomRange(0.01, 0.02),
     vignetteStrength = randomRange(0.02, 0.04),
   } = options
@@ -282,14 +265,11 @@ export async function deduplicateImage(base64Src, options = {}) {
   ctx.fillText(emoji, emojiX, emojiY)
   ctx.globalAlpha = 1.0
 
-  // ---- 步骤 9：采样边缘颜色 → 混合偏白后加极窄边框 ----
-  const processedImageData = ctx.getImageData(0, 0, outW, outH)
-  const edgeColor = sampleEdgeColor(processedImageData, outW, outH)
-
-  // 边框颜色与白色混合（70%白 + 30%边缘色），让边框更融入背景
-  const blendR = Math.round(edgeColor.r * 0.3 + 255 * 0.7)
-  const blendG = Math.round(edgeColor.g * 0.3 + 255 * 0.7)
-  const blendB = Math.round(edgeColor.b * 0.3 + 255 * 0.7)
+  // ---- 步骤 9：彩色相框边框（HSL 约束随机，保证好看）----
+  const color = borderColor || randomBorderColor()
+  // 边框宽度：图片短边的 3%~5%
+  const shortSide = Math.min(outW, outH)
+  const borderWidth = Math.round(shortSide * randomRange(0.03, 0.05))
 
   // 创建带边框的最终画布
   const finalW = outW + borderWidth * 2
@@ -299,8 +279,8 @@ export async function deduplicateImage(base64Src, options = {}) {
   finalCanvas.height = finalH
   const finalCtx = finalCanvas.getContext('2d')
 
-  // 先画边框背景色（混合后的浅色）
-  finalCtx.fillStyle = `rgb(${blendR}, ${blendG}, ${blendB})`
+  // 先画纯色边框背景
+  finalCtx.fillStyle = `rgb(${color.r}, ${color.g}, ${color.b})`
   finalCtx.fillRect(0, 0, finalW, finalH)
 
   // 再把处理好的图画上去（居中）

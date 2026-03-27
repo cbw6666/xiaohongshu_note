@@ -3,7 +3,7 @@ import { parseExcel, generateTemplate } from '../utils/excelImporter.js'
 import { extractNoteId, parseNote, downloadImage, randomDelay, delay, SPEED_PRESETS, RateLimitManager } from '../services/noteParserService.js'
 import { rewriteContent, rewriteTitle } from '../services/rewriteService.js'
 import { calcTitleLen, buildRetitlePrompt, callAI } from '../services/aiService.js'
-import { deduplicateImage } from '../utils/imageDeduplicator.js'
+import { deduplicateImage, randomBorderColor } from '../utils/imageDeduplicator.js'
 import { humanizeNote } from '../services/humanizerService.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
 import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
@@ -316,11 +316,12 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             const base64 = await downloadImage(img.proxyUrl, { signal: controller.signal, fallbackUrls: img.fallbackUrls })
             if (base64) downloadedImages.push(base64)
           }
-          // 自动图片去重
+          // 自动图片去重（同一篇笔记所有图片共享同一个边框颜色）
           if (globalSettings.enableImageDedup && downloadedImages.length > 0) {
             setProgress(prev => ({ ...prev, text: `正在对第 ${completedAll + 1} 条的图片去重...` }))
+            const noteBorderColor = randomBorderColor()
             for (let imgIdx = 0; imgIdx < downloadedImages.length; imgIdx++) {
-              downloadedImages[imgIdx] = await deduplicateImage(downloadedImages[imgIdx])
+              downloadedImages[imgIdx] = await deduplicateImage(downloadedImages[imgIdx], { borderColor: noteBorderColor })
             }
             note.deduplicated = true
           }
@@ -802,15 +803,16 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
             if (base64) downloadedImages.push(base64)
           }
 
-          // 图片去重
+          // 图片去重（同一篇笔记所有图片共享同一个边框颜色）
           if (globalSettings.enableImageDedup && downloadedImages.length > 0) {
             setOneClickProgress(prev => ({
               ...prev,
               phase: '图片去重',
               text: `[${batchIdx + 1}/${batches.length}批] 去重第 ${processedCount}/${total} 条的图片...`,
             }))
+            const noteBorderColor = randomBorderColor()
             for (let imgIdx = 0; imgIdx < downloadedImages.length; imgIdx++) {
-              downloadedImages[imgIdx] = await deduplicateImage(downloadedImages[imgIdx])
+              downloadedImages[imgIdx] = await deduplicateImage(downloadedImages[imgIdx], { borderColor: noteBorderColor })
             }
           }
         }
