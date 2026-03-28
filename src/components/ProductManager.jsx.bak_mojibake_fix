@@ -69,16 +69,14 @@ const XHS_SOURCE_SCORE_MAP = {
   suggest: 1.8,
   recommend: 1.5,
   trending: 1.5,
+  hashtag: 1.2,
   manual: 1.5,
 }
-const XHS_ALLOWED_SEARCH_SOURCES = new Set(['suggest', 'recommend', 'trending', 'manual'])
 const XHS_NOISE_KEYWORDS = new Set([
   'all', 'image', 'video', 'user', 'discover', 'follow', 'message', 'live', 'publish',
   'search', 'recommend', 'related', 'more', 'back', 'login', 'register', 'settings',
-  'home', 'official', 'ad', 'note', 'default', 'first_enter', 'token', 'uuid', 'traceid',
+  'home', 'official', 'ad', 'note',
 ])
-
-const hasCjk = (input = '') => /[\u3400-\u9fff]/.test(String(input || ''))
 
 const splitKeywordText = (input = '') =>
   String(input || '')
@@ -90,7 +88,6 @@ const normalizeKeywordWord = (raw = '') =>
   String(raw || '')
     .replace(/^[#＃]+/, '')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\b(pdf|docx?|xlsx?|pptx?)$/i, '')
     .replace(/[|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -99,33 +96,13 @@ const normalizeKeywordKey = (raw = '') => normalizeKeywordWord(raw).toLowerCase(
 
 const isLikelyNoiseKeyword = (word = '', seedKeyword = '') => {
   if (!word) return true
-  if (word.length < 2 || word.length > 40) return true
-  const seedHasCjk = hasCjk(seedKeyword)
-  if (seedHasCjk && !hasCjk(word)) return true
-  if (/[，。！？；：,.!?]/.test(word)) return true
-  if (/^\d+(?:\.\d+){1,}/.test(word)) return true
-  if (/^\d+[、.)）]/.test(word)) return true
+  if (word.length < 2 || word.length > 20) return true
   if (/^\d+$/.test(word)) return true
-  if (/^[a-f0-9]{4,}$/i.test(word)) return true
-  if (/^[a-f0-9]{1,8}(?:-[a-f0-9]{1,8})+$/i.test(word)) return true
-  if (/^[A-Z0-9_]{4,}$/.test(word)) return true
   if (/^[\W_]+$/.test(word)) return true
-  if (/[{}<>:=]/.test(word) || word.includes('[') || word.includes(']')) return true
-  if (/(其实|觉得|就是|真的|能考|就这|建议|如果|但是|因为|我们|你们|这个|那个|这样|那样)/.test(word)) return true
   if (XHS_NOISE_KEYWORDS.has(word.toLowerCase())) return true
   if (normalizeKeywordKey(word) === normalizeKeywordKey(seedKeyword)) return true
   if (/^(click|open|copy|paste|input|output|view|retry|confirm|cancel)$/i.test(word)) return true
   return false
-}
-
-const isAcceptableImportedKeyword = (word = '', seedKeyword = '') => {
-  if (!word) return false
-  if (word.length < 2 || word.length > 48) return false
-  const seedHasCjk = hasCjk(seedKeyword)
-  if (seedHasCjk && !hasCjk(word)) return false
-  if (/^[\W_]+$/.test(word)) return false
-  if (normalizeKeywordKey(word) === normalizeKeywordKey(seedKeyword)) return false
-  return true
 }
 
 const pickSeoSeedKeyword = (seoForm, product) => {
@@ -140,16 +117,22 @@ const sanitizeImportedKeywords = (payload = {}) => {
   const fallbackSeed = normalizeKeywordWord(payload?.seedKeyword || '')
   const rawList = Array.isArray(payload?.keywords) ? payload.keywords : []
   const unique = []
+  const seen = new Set()
 
   rawList.forEach((item) => {
     const wordRaw = typeof item === 'string' ? item : item?.word
     const sourceRaw = typeof item === 'string' ? 'manual' : (item?.source || 'manual')
+    const word = normalizeKeywordWord(wordRaw)
     const source = String(sourceRaw || 'manual').toLowerCase()
-    const word = String(wordRaw || '').trim()
-    if (!word) return
     const scoreDefault = XHS_SOURCE_SCORE_MAP[source] || XHS_SOURCE_SCORE_MAP.manual
     const parsedScore = Number(typeof item === 'string' ? NaN : item?.score)
     const score = Number.isFinite(parsedScore) ? Math.max(0.5, Math.min(3, parsedScore)) : scoreDefault
+
+    if (isLikelyNoiseKeyword(word, fallbackSeed)) return
+    const key = normalizeKeywordKey(word)
+    if (!key || seen.has(key)) return
+
+    seen.add(key)
     unique.push({ word, source, score })
   })
 
@@ -159,160 +142,61 @@ const sanitizeImportedKeywords = (payload = {}) => {
   }
 }
 
-const mergeLongTailKeywordsText = (existingText = '', incomingKeywords = [], seedKeyword = '') => {
-  const existingLines = splitKeywordText(existingText)
-  const incomingLines = incomingKeywords
-    .map((item) => String(item?.word || '').trim())
-    .filter(Boolean)
-  const merged = [...existingLines, ...incomingLines]
-  const deduped = []
+const mergeLongTailKeywordsText = (existingText = '', incomingKeywords = []) => {
+  const merged = []
   const seen = new Set()
-  merged.forEach((word) => {
+  const appendWord = (word) => {
+    const normalized = normalizeKeywordWord(word)
+    const key = normalizeKeywordKey(normalized)
+    if (!normalized || !key || seen.has(key)) return
+    seen.add(key)
+    merged.push(normalized)
+  }
+
+  splitKeywordText(existingText).forEach(appendWord)
+  incomingKeywords.forEach((item) => appendWord(item.word))
+  return merged.join('\n')
+}
+
+const mergeLongTailPoolText = (existingPoolText = '', incomingKeywords = []) => {
+  const existing = Array.isArray(keywordTextToPool(existingPoolText)) ? keywordTextToPool(existingPoolText) : []
+  const order = []
+  const mergedMap = new Map()
+
+  existing.forEach((item) => {
+    const word = normalizeKeywordWord(item?.word)
     const key = normalizeKeywordKey(word)
-    if (!key || seen.has(key)) return
-    seen.add(key)
-    deduped.push(word)
+    if (!word || !key || mergedMap.has(key)) return
+    const weight = Number.isFinite(Number(item?.weight)) ? Math.max(0.1, Math.min(10, Number(item.weight))) : 1
+    mergedMap.set(key, { word, weight, locked: Boolean(item?.locked) })
+    order.push(key)
   })
-  return deduped.join('\n')
-}
 
-const mergeLongTailPoolText = (existingPoolText = '', incomingKeywords = [], seedKeyword = '') => {
-  const existingLines = String(existingPoolText || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const incomingLinesRaw = incomingKeywords
-    .map((item) => {
-      const word = String(item?.word || '').trim()
-      if (!word) return ''
-      const targetWeight = Number.isFinite(Number(item?.score)) ? Number(item.score) : XHS_SOURCE_SCORE_MAP.manual
-      const weight = Math.max(0.1, Math.min(10, targetWeight))
-      return `${word}|${weight}|0`
+  incomingKeywords.forEach((item) => {
+    const word = normalizeKeywordWord(item?.word)
+    const key = normalizeKeywordKey(word)
+    if (!word || !key) return
+    const targetWeight = Number.isFinite(Number(item?.score)) ? Number(item.score) : XHS_SOURCE_SCORE_MAP.manual
+
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, {
+        word,
+        weight: Math.max(0.1, Math.min(10, targetWeight)),
+        locked: false,
+      })
+      order.push(key)
+      return
+    }
+
+    const prev = mergedMap.get(key)
+    mergedMap.set(key, {
+      ...prev,
+      weight: Math.max(prev.weight || 1, Math.max(0.1, Math.min(10, targetWeight))),
     })
-    .filter(Boolean)
+  })
 
-  const deduped = []
-  const seen = new Set()
-  const appendPoolLine = (line) => {
-    const rawWord = String(line || '').split('|')[0]?.trim() || ''
-    const key = normalizeKeywordKey(rawWord)
-    if (!key || seen.has(key)) return
-    seen.add(key)
-    deduped.push(line)
-  }
-
-  existingLines.forEach(appendPoolLine)
-  incomingLinesRaw.forEach(appendPoolLine)
-  return deduped.join('\n')
-}
-
-const normalizeImportedKeywordPayload = (parsed, fallbackSeed = '') => {
-  if (Array.isArray(parsed)) {
-    return { seedKeyword: fallbackSeed, keywords: parsed }
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    return { seedKeyword: fallbackSeed, keywords: [] }
-  }
-  if (Array.isArray(parsed.keywords)) {
-    return {
-      seedKeyword: parsed.seedKeyword || fallbackSeed,
-      keywords: parsed.keywords,
-    }
-  }
-  if (parsed.data && Array.isArray(parsed.data.keywords)) {
-    return {
-      seedKeyword: parsed.data.seedKeyword || parsed.seedKeyword || fallbackSeed,
-      keywords: parsed.data.keywords,
-    }
-  }
-  if (Array.isArray(parsed.words)) {
-    return {
-      seedKeyword: parsed.seedKeyword || fallbackSeed,
-      keywords: parsed.words,
-    }
-  }
-  return { seedKeyword: parsed.seedKeyword || fallbackSeed, keywords: [] }
-}
-
-const findJsonBlock = (text = '', startIndex = 0) => {
-  const raw = String(text || '')
-  let start = -1
-  for (let i = Math.max(0, startIndex); i < raw.length; i += 1) {
-    const ch = raw[i]
-    if (ch === '{' || ch === '[') {
-      start = i
-      break
-    }
-  }
-  if (start < 0) return ''
-
-  const open = raw[start]
-  const close = open === '{' ? '}' : ']'
-  let depth = 0
-  let inString = false
-  let escaped = false
-
-  for (let i = start; i < raw.length; i += 1) {
-    const ch = raw[i]
-    if (inString) {
-      if (escaped) {
-        escaped = false
-      } else if (ch === '\\') {
-        escaped = true
-      } else if (ch === '"') {
-        inString = false
-      }
-      continue
-    }
-    if (ch === '"') {
-      inString = true
-      continue
-    }
-    if (ch === open) {
-      depth += 1
-      continue
-    }
-    if (ch === close) {
-      depth -= 1
-      if (depth === 0) return raw.slice(start, i + 1)
-    }
-  }
-  return ''
-}
-
-const parseSeoKeywordPayloadFromText = (rawText = '', fallbackSeed = '') => {
-  const text = String(rawText || '').trim()
-  if (!text) return normalizeImportedKeywordPayload({}, fallbackSeed)
-
-  const attempts = []
-  attempts.push(text)
-
-  const markerRegex = /===\s*XHS SEO LONGTAIL JSON START\s*===([\s\S]*?)===\s*XHS SEO LONGTAIL JSON END\s*===/i
-  const markerMatch = text.match(markerRegex)
-  if (markerMatch?.[1]) {
-    const marked = findJsonBlock(markerMatch[1], 0)
-    if (marked) attempts.push(marked)
-  }
-
-  const packedIndex = text.indexOf('XHS_SEO_JSON=')
-  if (packedIndex >= 0) {
-    const packed = findJsonBlock(text, packedIndex + 'XHS_SEO_JSON='.length)
-    if (packed) attempts.push(packed)
-  }
-
-  const firstJson = findJsonBlock(text, 0)
-  if (firstJson) attempts.push(firstJson)
-
-  for (const item of attempts) {
-    try {
-      const parsed = JSON.parse(item)
-      return normalizeImportedKeywordPayload(parsed, fallbackSeed)
-    } catch {
-      // try next candidate
-    }
-  }
-
-  throw new Error('无法识别JSON格式，请粘贴控制台打印的JSON对象')
+  const finalPool = order.map((key) => mergedMap.get(key)).filter(Boolean)
+  return keywordPoolToText(finalPool)
 }
 
 const buildXhsKeywordSyncScript = (seedKeyword) => {
@@ -322,258 +206,72 @@ const buildXhsKeywordSyncScript = (seedKeyword) => {
   var CHANNEL = '${XHS_SEO_SYNC_CHANNEL}';
   var MAX_COUNT = ${XHS_MAX_IMPORTED_KEYWORDS};
   var seedKeyword = ${safeSeed};
+  var sourceScoreMap = { suggest: 1.8, recommend: 1.5, trending: 1.5, hashtag: 1.2, manual: 1.5 };
+  var stopWords = {
+    all: 1, image: 1, video: 1, user: 1, discover: 1, follow: 1, message: 1, live: 1,
+    publish: 1, search: 1, recommend: 1, related: 1, more: 1, back: 1, login: 1,
+    register: 1, settings: 1, home: 1, official: 1, ad: 1, note: 1
+  };
 
-  function norm(raw) {
+  function normalizeWord(raw) {
     return String(raw || '')
       .replace(/^[#＃]+/, '')
       .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+      .replace(/[|]+/g, ' ')
       .replace(/\\s+/g, ' ')
       .trim();
   }
 
   function keyOf(word) {
-    return norm(word).toLowerCase();
-  }
-
-  function hasCjk(text) {
-    return /[\\u4e00-\\u9fff]/.test(String(text || ''));
-  }
-
-  var stopWords = {
-    all: 1, image: 1, video: 1, user: 1, discover: 1, follow: 1, message: 1, live: 1,
-    publish: 1, search: 1, recommend: 1, related: 1, more: 1, back: 1, login: 1,
-    register: 1, settings: 1, home: 1, official: 1, ad: 1, note: 1,
-    default: 1, first_enter: 1, token: 1, uuid: 1, traceid: 1
-  };
-
-  var sourceScoreMap = { suggest: 1.8, recommend: 1.5, trending: 1.5, manual: 1.5 };
-  var seed = norm(seedKeyword);
-  var seedHasCjk = hasCjk(seed);
-
-  function buildSeedAnchor() {
-    var s = seed.replace(/20\\d{2}年?/g, '').replace(/\\d+/g, '').trim();
-    if (!s) s = seed;
-    if (seedHasCjk) {
-      s = s.replace(/[^\\u4e00-\\u9fff]/g, '');
-    }
-    if (s.length > 8) s = s.slice(0, 8);
-    return s;
-  }
-
-  var seedAnchor = buildSeedAnchor();
-
-  function sharedCjkCount(a, b) {
-    var map = {};
-    var i;
-    for (i = 0; i < a.length; i += 1) map[a[i]] = 1;
-    var count = 0;
-    var used = {};
-    for (i = 0; i < b.length; i += 1) {
-      var ch = b[i];
-      if (used[ch]) continue;
-      used[ch] = 1;
-      if (map[ch]) count += 1;
-    }
-    return count;
-  }
-
-  function related(word) {
-    var w = norm(word);
-    if (!w) return false;
-    if (!seedAnchor) return true;
-    if (w.indexOf(seedAnchor) >= 0 || seedAnchor.indexOf(w) >= 0) return true;
-    if (seedHasCjk && hasCjk(w) && sharedCjkCount(w, seedAnchor) >= 3) return true;
-    return false;
+    return normalizeWord(word).toLowerCase();
   }
 
   function isNoise(word) {
-    var w = norm(word);
-    if (!w) return true;
-    if (w.length < 2 || w.length > 48) return true;
-    if (seedHasCjk && !hasCjk(w)) return true;
-    if (/^[\\d]+$/.test(w)) return true;
-    if (/^[a-f0-9]{4,}$/i.test(w)) return true;
-    if (/^[A-Z0-9_]{4,}$/.test(w)) return true;
-    if (w.indexOf('[') >= 0 || w.indexOf(']') >= 0 || /[{}<>:=]/.test(w)) return true;
-    if (/[，。！？；：,.!?]/.test(w)) return true;
-    if (/^\\d+[、.)）]/.test(w)) return true;
-    if (stopWords[keyOf(w)]) return true;
-    if (keyOf(w) === keyOf(seed)) return true;
+    if (!word) return true;
+    if (word.length < 2 || word.length > 20) return true;
+    if (/^\\d+$/.test(word)) return true;
+    if (/^[\\W_]+$/.test(word)) return true;
+    if (stopWords[keyOf(word)]) return true;
+    if (keyOf(word) === keyOf(seedKeyword)) return true;
     return false;
   }
 
-  function splitParts(text) {
+  function splitCandidateText(text) {
     return String(text || '')
-      .split(/[\\n\\r\\t,，、|/]+/)
-      .map(function (p) { return norm(p); })
+      .split(/[\\n\\r\\t,，、|/\\-]+/)
+      .map(function (part) { return normalizeWord(part); })
       .filter(Boolean);
   }
 
   var list = [];
   var seen = {};
   function pushWord(rawWord, source, score) {
-    var w = norm(rawWord);
-    if (isNoise(w)) return;
-    if (!related(w)) return;
-    var k = keyOf(w);
-    if (!k || seen[k]) return;
-    seen[k] = 1;
+    var word = normalizeWord(rawWord);
+    if (isNoise(word)) return;
+    var key = keyOf(word);
+    if (!key || seen[key]) return;
+    seen[key] = 1;
     list.push({
-      word: w,
+      word: word,
       source: source || 'manual',
       score: Number(score) || sourceScoreMap[source] || 1.5
     });
   }
 
-  function isVisible(el) {
-    if (!el || !el.getBoundingClientRect) return false;
-    var style = window.getComputedStyle(el);
-    if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-    var r = el.getBoundingClientRect();
-    return r.width > 8 && r.height > 8;
-  }
-
-  function findSearchInput() {
-    var inputs = Array.prototype.slice.call(document.querySelectorAll('input[type="search"], input[type="text"]'));
-    var best = null;
-    var bestScore = -1;
-    inputs.forEach(function (input) {
-      if (!isVisible(input)) return;
-      var r = input.getBoundingClientRect();
-      if (r.width < 160 || r.height < 24) return;
-      var score = 0;
-      var v = norm(input.value || '');
-      var ph = String(input.placeholder || '');
-      if (v && related(v)) score += 4;
-      if (ph.indexOf('搜索') >= 0 || ph.indexOf('Search') >= 0) score += 3;
-      if (document.activeElement === input) score += 2;
-      if (r.top < 240) score += 2;
-      if (score > bestScore) {
-        bestScore = score;
-        best = input;
-      }
-    });
-    return best;
-  }
-
-  function openSuggest(input) {
-    if (!input) return;
-    try {
-      var old = input.value || '';
-      input.focus();
-      input.click();
-      input.dispatchEvent(new Event('focus', { bubbles: true }));
-      input.value = old + ' ';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.value = old;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
-    } catch (err) {
-      console.warn('[SEO keyword sync] open suggest failed', err);
-    }
-  }
-
-  function collectFromDropdown() {
-    var input = findSearchInput();
-    if (!input) return 0;
-    var ir = input.getBoundingClientRect();
-
-    var bestBox = null;
-    var bestCount = -1;
-
-    var boxes = document.querySelectorAll('div, ul, section');
-    boxes.forEach(function (box) {
-      if (!isVisible(box)) return;
-      var br = box.getBoundingClientRect();
-      if (br.width < 180 || br.width > 980) return;
-      if (br.height < 120 || br.height > 780) return;
-      if (br.top < ir.bottom - 16 || br.top > ir.bottom + 120) return;
-      if (Math.abs(br.left - ir.left) > 48) return;
-      if (Math.abs(br.width - ir.width) > Math.max(100, ir.width * 0.3)) return;
-
-      var rows = box.querySelectorAll('li, a, button, [role="option"], div, span');
-      var cnt = 0;
-      rows.forEach(function (row) {
-        if (!isVisible(row)) return;
-        var rr = row.getBoundingClientRect();
-        if (rr.width < 110 || rr.height < 16 || rr.height > 86) return;
-        var t = norm(row.textContent || '');
-        if (!t || t.length > 48 || t.indexOf('\\n') >= 0) return;
-        if (!related(t)) return;
-        cnt += 1;
-      });
-
-      if (cnt > bestCount) {
-        bestCount = cnt;
-        bestBox = box;
-      }
-    });
-
-    if (!bestBox) return 0;
-
-    var added = 0;
-    var rowSeen = {};
-    var finalRows = bestBox.querySelectorAll('li, a, button, [role="option"], div, span');
-    finalRows.forEach(function (row) {
-      if (!isVisible(row)) return;
-      var rr = row.getBoundingClientRect();
-      if (rr.width < 110 || rr.height < 16 || rr.height > 86) return;
-      var t = norm(row.textContent || '');
-      if (!t || t.length > 48 || t.indexOf('\\n') >= 0) return;
-      var tk = keyOf(t);
-      if (rowSeen[tk]) return;
-      rowSeen[tk] = 1;
-      if (!related(t)) return;
-      splitParts(t).forEach(function (w) {
-        var before = list.length;
-        pushWord(w, 'suggest', sourceScoreMap.suggest);
-        if (list.length > before) added += 1;
-      });
-    });
-
-    return added;
-  }
-
-  function collectFromSelectors() {
-    var groups = [
-      { selector: '[class*="suggest"] a, [class*="suggest"] li, [class*="suggest"] button, [class*="suggest"] span', source: 'suggest' },
-      { selector: '[class*="recommend"] a, [class*="recommend"] li, [class*="recommend"] button, [class*="recommend"] span', source: 'recommend' },
-      { selector: '[class*="related"] a, [class*="related"] li, [class*="related"] button, [class*="related"] span', source: 'recommend' },
-      { selector: '[class*="trend"] a, [class*="trend"] li, [class*="trend"] button, [class*="trend"] span', source: 'trending' },
-      { selector: '[class*="hot"] a, [class*="hot"] li, [class*="hot"] button, [class*="hot"] span', source: 'trending' },
-      { selector: '[class*="query"] a, [class*="query"] li, [class*="query"] button, [class*="query"] span', source: 'trending' }
-    ];
-
-    groups.forEach(function (group) {
-      try {
-        var els = document.querySelectorAll(group.selector);
-        els.forEach(function (el) {
-          if (!isVisible(el)) return;
-          var t = norm(el.textContent || '');
-          if (!t || t.length > 48) return;
-          if (!related(t)) return;
-          splitParts(t).forEach(function (w) {
-            pushWord(w, group.source, sourceScoreMap[group.source] || 1.5);
-          });
-        });
-      } catch (err) {
-        console.warn('[SEO keyword sync] selector read failed', group.selector, err);
-      }
-    });
-  }
-
-  function inferSource(path) {
+  function inferSourceByPath(path) {
     var p = String(path || '').toLowerCase();
     if (/(suggest|sug|hint)/.test(p)) return 'suggest';
-    if (/(recommend|related)/.test(p)) return 'recommend';
+    if (/(recommend|related|card|onebox)/.test(p)) return 'recommend';
     if (/(trend|hot|query)/.test(p)) return 'trending';
-    return '';
+    return 'manual';
   }
 
-  function walkState(node, path, depth) {
+  function scanState(node, path, depth) {
     if (!node || depth > 6) return;
     if (Array.isArray(node)) {
-      node.forEach(function (item, idx) { walkState(item, path + '[' + idx + ']', depth + 1); });
+      node.forEach(function (item, index) {
+        scanState(item, path + '[' + index + ']', depth + 1);
+      });
       return;
     }
     if (typeof node !== 'object') return;
@@ -581,160 +279,136 @@ const buildXhsKeywordSyncScript = (seedKeyword) => {
     Object.keys(node).forEach(function (key) {
       var value = node[key];
       var nextPath = path ? path + '.' + key : key;
-      var source = inferSource(nextPath);
-      if (!source) {
-        walkState(value, nextPath, depth + 1);
-        return;
-      }
+      var source = inferSourceByPath(nextPath);
 
       if (typeof value === 'string') {
-        splitParts(value).forEach(function (w) { pushWord(w, source, sourceScoreMap[source] || 1.5); });
+        if (/(suggest|sug|hint|recommend|related|trend|hot|query|keyword|word)/i.test(key)) {
+          splitCandidateText(value).forEach(function (word) {
+            pushWord(word, source, sourceScoreMap[source] || 1.5);
+          });
+        }
         return;
       }
 
-      if (Array.isArray(value)) {
+      if (Array.isArray(value) && /(suggest|sug|hint|recommend|related|trend|hot|query|keyword|word)/i.test(key)) {
         value.forEach(function (item) {
           if (typeof item === 'string') {
-            splitParts(item).forEach(function (w) { pushWord(w, source, sourceScoreMap[source] || 1.5); });
+            splitCandidateText(item).forEach(function (word) {
+              pushWord(word, source, sourceScoreMap[source] || 1.5);
+            });
             return;
           }
           if (!item || typeof item !== 'object') return;
-          [item.word, item.searchWord, item.keyword, item.query, item.text, item.title, item.name].forEach(function (cand) {
-            splitParts(cand).forEach(function (w) { pushWord(w, source, sourceScoreMap[source] || 1.5); });
+          var candidates = [item.word, item.searchWord, item.keyword, item.query, item.text, item.title, item.name];
+          candidates.forEach(function (candidate) {
+            splitCandidateText(candidate).forEach(function (word) {
+              pushWord(word, source, sourceScoreMap[source] || 1.5);
+            });
           });
         });
       }
 
-      walkState(value, nextPath, depth + 1);
+      scanState(value, nextPath, depth + 1);
     });
   }
 
-  function collectFromState() {
+  function parseFromState() {
     try {
       var state = window.__INITIAL_STATE__ || {};
-      walkState(state, 'state', 0);
+      scanState(state.search || state, 'state.search', 0);
     } catch (err) {
-      console.warn('[SEO keyword sync] parse state failed', err);
+      console.warn('[SEO keyword sync] parse __INITIAL_STATE__ failed', err);
     }
   }
 
-  function pickFinalKeywords() {
-    var suggestOnly = list.filter(function (item) { return item.source === 'suggest'; });
-    if (suggestOnly.length > 0) return suggestOnly.slice(0, MAX_COUNT);
-    var preferred = list.filter(function (item) { return item.source === 'recommend' || item.source === 'trending'; });
-    return preferred.slice(0, MAX_COUNT);
-  }
+  function parseFromDom() {
+    var selectorGroups = [
+      { selector: '[class*="suggest"] *', source: 'suggest' },
+      { selector: '[class*="recommend"] *', source: 'recommend' },
+      { selector: '[class*="related"] *', source: 'recommend' },
+      { selector: '[class*="trend"] *', source: 'trending' },
+      { selector: '[class*="hot"] *', source: 'trending' },
+      { selector: '[class*="query"] *', source: 'trending' }
+    ];
 
-  function post(result) {
-    var packet = { source: SOURCE, type: 'data', data: result };
-    var sent = false;
-    var prettyJson = JSON.stringify(result, null, 2);
-    var packedJson = JSON.stringify(result);
-
-    try {
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(packet, '*');
-        window.opener.postMessage(JSON.stringify(packet), '*');
-        window.opener.postMessage({ source: SOURCE, type: 'data', data: JSON.stringify(result) }, '*');
-        window.opener.postMessage({ source: SOURCE, payload: result }, '*');
-        sent = true;
-      }
-    } catch (err) {
-      console.warn('[SEO keyword sync] postMessage failed', err);
-    }
-
-    try {
-      var bc = new BroadcastChannel(CHANNEL);
-      bc.postMessage(packet);
-      bc.postMessage(JSON.stringify(packet));
-      bc.close();
-    } catch (err) {
-      console.warn('[SEO keyword sync] BroadcastChannel failed', err);
-    }
-
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        var maybePromise = navigator.clipboard.writeText(prettyJson);
-        if (maybePromise && typeof maybePromise.catch === 'function') {
-          maybePromise.catch(function (err) {
-            console.warn('[SEO keyword sync] clipboard write rejected', err);
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('[SEO keyword sync] clipboard write failed', err);
-    }
-
-    try {
-      if (typeof copy === 'function') {
-        copy(prettyJson);
-        console.log('JSON copied by DevTools copy().');
-      }
-    } catch (err) {
-      console.warn('[SEO keyword sync] DevTools copy() failed', err);
-    }
-
-    console.log('=== XHS SEO LONGTAIL JSON START ===');
-    console.log(prettyJson);
-    console.log('XHS_SEO_JSON=' + packedJson);
-    console.log('=== XHS SEO LONGTAIL JSON END ===');
-    if (sent) {
-      console.log('Payload posted back to tool page.');
+    selectorGroups.forEach(function (group) {
       try {
-        if (window.opener && !window.opener.closed) {
-          window.opener.postMessage({
-            source: SOURCE,
-            type: 'done',
-            message: '长尾词抓取完成，已自动回填并尝试切回工具页。'
-          }, '*');
-          if (typeof window.opener.focus === 'function') {
-            window.opener.focus();
-          }
-          setTimeout(function () {
-            try { window.close(); } catch (err) {}
-          }, 220);
-        }
+        var els = document.querySelectorAll(group.selector);
+        els.forEach(function (el) {
+          var text = normalizeWord(el.textContent || '');
+          if (!text) return;
+          splitCandidateText(text).forEach(function (word) {
+            pushWord(word, group.source, sourceScoreMap[group.source] || 1.5);
+          });
+        });
       } catch (err) {
-        console.warn('[SEO keyword sync] auto focus/close failed', err);
+        console.warn('[SEO keyword sync] read DOM failed', group.selector, err);
       }
-    } else {
-      console.log('Auto-return failed, copy JSON manually into the tool page.');
-    }
-  }
-
-  function run(attempt) {
-    collectFromState();
-    var dropdownCount = collectFromDropdown();
-    if (dropdownCount < 5) collectFromSelectors();
-
-    var suggestCount = list.filter(function (item) { return item.source === 'suggest'; }).length;
-    if (suggestCount < 5 && attempt < 8) {
-      openSuggest(findSearchInput());
-      setTimeout(function () { run(attempt + 1); }, 300);
-      return;
-    }
-
-    post({
-      seedKeyword: norm(seedKeyword),
-      keywords: pickFinalKeywords()
     });
   }
 
-  openSuggest(findSearchInput());
-  setTimeout(function () { run(0); }, 150);
+  function parseFromHashtags() {
+    try {
+      var rawText = (document.body && document.body.innerText) || '';
+      var matches = rawText.match(/#[^\\s#]{2,20}/g) || [];
+      matches.forEach(function (tag) {
+        pushWord(tag.replace(/^#/, ''), 'hashtag', sourceScoreMap.hashtag);
+      });
+    } catch (err) {
+      console.warn('[SEO keyword sync] parse hashtags failed', err);
+    }
+  }
+
+  parseFromState();
+  parseFromDom();
+  parseFromHashtags();
+
+  var result = {
+    seedKeyword: normalizeWord(seedKeyword),
+    keywords: list.slice(0, MAX_COUNT)
+  };
+  var packet = { source: SOURCE, type: 'data', data: result };
+
+  var sent = false;
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(packet, '*');
+      sent = true;
+    }
+  } catch (err) {
+    console.warn('[SEO keyword sync] postMessage failed', err);
+  }
+
+  try {
+    var bc = new BroadcastChannel(CHANNEL);
+    bc.postMessage(packet);
+    bc.close();
+  } catch (err) {
+    console.warn('[SEO keyword sync] BroadcastChannel failed', err);
+  }
+
+  console.log('=== XHS SEO LONGTAIL JSON START ===');
+  console.log(JSON.stringify(result, null, 2));
+  console.log('=== XHS SEO LONGTAIL JSON END ===');
+  if (sent) {
+    console.log('Payload posted back to tool page.');
+  } else {
+    console.log('Auto-return failed, copy JSON manually into the tool page.');
+  }
 })();`
 }
+
 export default function ProductManager({ shop, onUpdateShop, settings, innerImagesMap, setInnerImagesMap }) {
   const [promptEditing, setPromptEditing] = useState(null)
   const [promptForm, setPromptForm] = useState({ customSystemPrompt: '' })
-  // 爆文参考
+  // 鐖嗘枃鍙傝€?
   const [refEditing, setRefEditing] = useState(null)
   const [refForm, setRefForm] = useState({ text: '' })
-  // AI 分析状态
+  // AI 鍒嗘瀽鐘舵€?
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisPreview, setAnalysisPreview] = useState(null) // { text, analysis }
   const [analysisError, setAnalysisError] = useState('')
-  // 风格模板
+  // 椋庢牸妯℃澘
   const [saveAsTemplate, setSaveAsTemplate] = useState(true)
   const [templateName, setTemplateName] = useState('')
   const [showTemplateList, setShowTemplateList] = useState(false)
@@ -752,14 +426,14 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   const [seoKeywordManualJson, setSeoKeywordManualJson] = useState('')
   const [seoKeywordManualError, setSeoKeywordManualError] = useState('')
   const seoKeywordWindowRef = useRef(null)
-  // 内页图上传
+  // 鍐呴〉鍥句笂浼?
   const innerImageInputRef = useRef(null)
-  const [innerImageTarget, setInnerImageTarget] = useState(null) // 当前正在上传内页图的商品ID
+  const [innerImageTarget, setInnerImageTarget] = useState(null) // 褰撳墠姝ｅ湪涓婁紶鍐呴〉鍥剧殑鍟嗗搧ID
   const refEditorRef = useRef(null)
   const promptEditorRef = useRef(null)
   const coverEditorRef = useRef(null)
   const seoEditorRef = useRef(null)
-  // 内页图拖拽排序
+  // 鍐呴〉鍥炬嫋鎷芥帓搴?
   const [dragIndex, setDragIndex] = useState(null)
   const [dragProductId, setDragProductId] = useState(null)
 
@@ -771,7 +445,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     onUpdateShop({ ...shop, products: products.filter(p => p.id !== id) })
   }
 
-  // 提示词编辑
+  // 鎻愮ず璇嶇紪杈?
   const handleEditPrompt = (p) => {
     setPromptEditing(p.id)
     setPromptForm({
@@ -796,7 +470,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setPromptForm({ customSystemPrompt: '' })
   }
 
-  // 爆文参考管理
+  // 鐖嗘枃鍙傝€冪鐞?
   const handleOpenRef = (p) => {
     setRefEditing(p.id)
     setRefForm({ text: '' })
@@ -826,11 +500,11 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setAnalysisPreview(null)
   }
 
-  // AI 分析后添加
+  // AI 鍒嗘瀽鍚庢坊鍔?
   const handleAnalyzeAndAdd = async () => {
     if (!refForm.text.trim()) return
     if (!settings?.apiKey || !settings?.endpointId) {
-      setAnalysisError('请先在设置页面配置 AI API Key 和推理接入点')
+      setAnalysisError('璇峰厛鍦ㄨ缃〉闈㈤厤缃?AI API Key 鍜屾帹鐞嗘帴鍏ョ偣')
       return
     }
 
@@ -843,13 +517,13 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       const analysis = await callAI(settings, messages)
       setAnalysisPreview({ text: refForm.text.trim(), analysis })
     } catch (err) {
-      setAnalysisError(`分析失败: ${err.message}`)
+      setAnalysisError(`鍒嗘瀽澶辫触: ${err.message}`)
     } finally {
       setAnalyzing(false)
     }
   }
 
-  // 确认保存分析结果
+  // 纭淇濆瓨鍒嗘瀽缁撴灉
   const handleConfirmAnalysis = () => {
     if (!analysisPreview) return
     const product = products.find(p => p.id === refEditing)
@@ -859,7 +533,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       text: analysisPreview.text,
       analysis: analysisPreview.analysis,
     }
-    // 是否同时保存为风格模板
+    // 鏄惁鍚屾椂淇濆瓨涓洪鏍兼ā鏉?
     let updatedTemplates = product.styleTemplates || []
     if (saveAsTemplate && templateName.trim()) {
       updatedTemplates = [...updatedTemplates, {
@@ -884,7 +558,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setSaveAsTemplate(true)
   }
 
-  // 切换风格模板启用/禁用
+  // 鍒囨崲椋庢牸妯℃澘鍚敤/绂佺敤
   const handleToggleTemplate = (productId, templateId) => {
     onUpdateShop({
       ...shop,
@@ -897,7 +571,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     })
   }
 
-  // 删除风格模板
+  // 鍒犻櫎椋庢牸妯℃澘
   const handleDeleteTemplate = (productId, templateId) => {
     onUpdateShop({
       ...shop,
@@ -1047,8 +721,8 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
     setSeoForm((prev) => ({
       ...prev,
-      longTailKeywordsText: mergeLongTailKeywordsText(prev.longTailKeywordsText, sanitized.keywords, sanitized.seedKeyword),
-      longTailPoolText: mergeLongTailPoolText(prev.longTailPoolText, sanitized.keywords, sanitized.seedKeyword),
+      longTailKeywordsText: mergeLongTailKeywordsText(prev.longTailKeywordsText, sanitized.keywords),
+      longTailPoolText: mergeLongTailPoolText(prev.longTailPoolText, sanitized.keywords),
     }))
 
     const fromText = fromManual ? '（手动导入）' : ''
@@ -1059,7 +733,12 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   }
 
   const parseManualSeoKeywordJson = (rawText) => {
-    return parseSeoKeywordPayloadFromText(rawText, seoKeywordSeed)
+    const parsed = JSON.parse(rawText)
+    if (Array.isArray(parsed)) return { seedKeyword: seoKeywordSeed, keywords: parsed }
+    if (parsed?.keywords) return parsed
+    if (parsed?.data?.keywords) return parsed.data
+    if (parsed?.words) return { seedKeyword: parsed.seedKeyword || seoKeywordSeed, keywords: parsed.words }
+    return { seedKeyword: parsed.seedKeyword || seoKeywordSeed, keywords: [] }
   }
 
   const handleApplySeoKeywordManualJson = () => {
@@ -1076,24 +755,6 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       if (added > 0) setSeoKeywordManualJson('')
     } catch (err) {
       setSeoKeywordManualError(`JSON解析失败: ${err.message}`)
-    }
-  }
-
-  const handleImportSeoKeywordFromClipboard = async () => {
-    setSeoKeywordManualError('')
-    try {
-      const raw = String(await navigator.clipboard.readText() || '').trim()
-      if (!raw) {
-        setSeoKeywordManualError('剪贴板为空，请先在小红书控制台执行脚本。')
-        return
-      }
-      const payload = parseManualSeoKeywordJson(raw)
-      const added = appendSeoKeywordsToForm(payload, true)
-      if (added > 0) {
-        setSeoKeywordManualJson(raw)
-      }
-    } catch (err) {
-      setSeoKeywordManualError(`剪贴板导入失败: ${err.message}`)
     }
   }
 
@@ -1134,10 +795,10 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
     setSeoKeywordSeed(seed)
     const targetUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(seed)}&source=web_explore_feed`
-    const win = window.open(targetUrl, '_blank')
+    const win = window.open(targetUrl, 'xhs_seo_keyword_window', 'width=1200,height=820,left=120,top=90')
     if (!win) {
       setSeoKeywordStatus('error')
-      setSeoKeywordMessage('浏览器拦截了新标签页，请允许后重试。')
+      setSeoKeywordMessage('浏览器拦截了弹窗，请允许弹窗后重试。')
       return
     }
 
@@ -1146,12 +807,12 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setSeoKeywordStatus('waiting')
     setSeoKeywordMessage(
       copied
-        ? '已打开小红书搜索页并复制脚本，请在控制台执行；执行完成后会自动切回并回填。'
-        : '已打开小红书搜索页，请先复制脚本并执行；完成后会自动尝试切回并回填。',
+        ? '已打开小红书搜索页并复制脚本，请在控制台粘贴执行。'
+        : '已打开小红书搜索页，请先复制脚本，再到控制台执行。',
     )
   }
 
-  // 内页图处理
+  // 鍐呴〉鍥惧鐞?
   const handleInnerImageUpload = (productId) => {
     setInnerImageTarget(productId)
     innerImageInputRef.current?.click()
@@ -1161,7 +822,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     const files = Array.from(e.target.files || [])
     if (files.length === 0 || !innerImageTarget) return
 
-    // 按文件修改时间排序（新 -> 旧，最近修改的排前面）
+    // 鎸夋枃浠朵慨鏀规椂闂存帓搴忥紙鏂?鈫?鏃э紝鏈€杩戜慨鏀圭殑鎺掑墠闈級
     files.sort((a, b) => b.lastModified - a.lastModified)
 
     const readers = files.map(file => {
@@ -1180,7 +841,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       setInnerImageTarget(null)
     })
 
-    // 重置 input 以允许重复上传同一文件
+    // 閲嶇疆 input 浠ュ厑璁搁噸澶嶄笂浼犲悓涓€鏂囦欢
     e.target.value = ''
   }
 
@@ -1199,7 +860,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     })
   }
 
-  // 内页图拖拽排序
+  // 鍐呴〉鍥炬嫋鎷芥帓搴?
   const handleInnerImageDragStart = (e, productId, idx) => {
     setDragIndex(idx)
     setDragProductId(productId)
@@ -1270,39 +931,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   }, [seoEditing])
 
   useEffect(() => {
-    const normalizeIncomingPayload = (raw) => {
-      if (!raw) return null
-      let incoming = raw
-
-      if (typeof incoming === 'string') {
-        try {
-          incoming = JSON.parse(incoming)
-        } catch {
-          return null
-        }
-      }
-
-      if (incoming?.source === XHS_SEO_SYNC_SOURCE && incoming?.type === 'data' && typeof incoming?.data === 'string') {
-        try {
-          incoming = { ...incoming, data: JSON.parse(incoming.data) }
-        } catch {
-          incoming = { ...incoming, data: null }
-        }
-      }
-
-      if (incoming?.source === XHS_SEO_SYNC_SOURCE && incoming?.payload?.keywords) {
-        return { source: XHS_SEO_SYNC_SOURCE, type: 'data', data: incoming.payload }
-      }
-
-      if (incoming?.keywords && (incoming?.seedKeyword || Array.isArray(incoming?.keywords))) {
-        return { source: XHS_SEO_SYNC_SOURCE, type: 'data', data: incoming }
-      }
-
-      return incoming
-    }
-
-    const handlePayload = (rawIncoming) => {
-      const incoming = normalizeIncomingPayload(rawIncoming)
+    const handlePayload = (incoming) => {
       if (!incoming || incoming.source !== XHS_SEO_SYNC_SOURCE) return
       if (incoming.type === 'data' && incoming.data) {
         setSeoKeywordSyncOpen(true)
@@ -1316,14 +945,6 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
         setSeoKeywordSyncOpen(true)
         setSeoKeywordStatus('error')
         setSeoKeywordMessage(incoming.message || '抓取失败，请手动粘贴JSON导入。')
-        return
-      }
-      if (incoming.type === 'done') {
-        setSeoKeywordSyncOpen(true)
-        if (incoming.message) {
-          setSeoKeywordStatus((prev) => (prev === 'done' ? 'done' : 'waiting'))
-          setSeoKeywordMessage(incoming.message)
-        }
       }
     }
 
@@ -1349,7 +970,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
   return (
     <div className="panel">
-      {/* 隐藏的内页图文件上传 input */}
+      {/* 闅愯棌鐨勫唴椤靛浘鏂囦欢涓婁紶 input */}
       <input
         ref={innerImageInputRef}
         type="file"
@@ -1358,29 +979,29 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
         style={{ display: 'none' }}
         onChange={handleInnerImageChange}
       />
-      <h2>📦 商品管理 <span className="panel-sub">- {shop.name}</span></h2>
-      <p className="hint" style={{ marginBottom: 12 }}>商品从千帆导入，可添加爆文参考（支持 AI 分析爆款因子）、定制提示词</p>
+      <h2>馃摝 鍟嗗搧绠＄悊 <span className="panel-sub">鈥?{shop.name}</span></h2>
+      <p className="hint" style={{ marginBottom: 12 }}>鍟嗗搧浠庡崈甯嗗鍏ワ紝鍙坊鍔犵垎鏂囧弬鑰冿紙鏀寔 AI 鍒嗘瀽鐖嗘鍥犲瓙锛夈€佸畾鍒舵彁绀鸿瘝</p>
 
-      {/* 爆文参考编辑面板 */}
+      {/* 鐖嗘枃鍙傝€冪紪杈戦潰鏉?*/}
       {refEditing && (
         <div ref={refEditorRef} style={{
           background: '#fff8f0', border: '1px solid #ffcc80', borderRadius: 12,
           padding: 20, marginBottom: 16
         }}>
           <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-            🔥 爆文参考 - {products.find(p => p.id === refEditing)?.name}
+            馃敟 鐖嗘枃鍙傝€?鈥?{products.find(p => p.id === refEditing)?.name}
           </h3>
           <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            直接粘贴小红书爆款笔记（标题+正文+标签均可），系统会自动分析爆款因子并仿写。可添加多篇参考。
+            鐩存帴绮樿创灏忕孩涔︾垎娆剧瑪璁帮紙鏍囬+姝ｆ枃+鏍囩鍧囧彲锛夛紝绯荤粺浼氳嚜鍔ㄥ垎鏋愮垎娆惧洜瀛愬苟浠垮啓銆傚彲娣诲姞澶氱瘒鍙傝€冦€?
           </p>
 
-          {/* 已添加的爆文列表 */}
+          {/* 宸叉坊鍔犵殑鐖嗘枃鍒楄〃 */}
           {(() => {
             const refs = products.find(p => p.id === refEditing)?.references || []
             return refs.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 {refs.map((ref, idx) => {
-                  // 兼容新旧格式：新格式用 ref.text，旧格式拼接 title + content
+                  // 鍏煎鏂版棫鏍煎紡锛氭柊鏍煎紡鐢?ref.text锛屾棫鏍煎紡鎷兼帴 title+content
                   const displayText = ref.text || [ref.title, ref.content, ref.tags].filter(Boolean).join('\n')
                   return (
                     <div key={ref.id} style={{
@@ -1407,7 +1028,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                           className="btn-sm btn-danger"
                           style={{ marginLeft: 10, flexShrink: 0 }}
                           onClick={() => handleDeleteRef(refEditing, ref.id)}
-                        >删除</button>
+                        >鍒犻櫎</button>
                       </div>
                     </div>
                   )
@@ -1416,13 +1037,13 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             )
           })()}
 
-          {/* AI 分析结果预览 */}
+          {/* AI 鍒嗘瀽缁撴灉棰勮 */}
           {analysisPreview && (
             <div style={{
               background: '#f3e5f5', border: '1px solid #ce93d8', borderRadius: 10,
               padding: 16, marginBottom: 14
             }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, color: '#7b1fa2' }}>🔍 爆款因子分析结果</h4>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14, color: '#7b1fa2' }}>馃攳 鐖嗘鍥犲瓙鍒嗘瀽缁撴灉</h4>
               <div style={{
                 fontSize: 12, color: '#444', lineHeight: 1.8,
                 maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-line',
@@ -1430,7 +1051,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
               }}>
                 {analysisPreview.analysis}
               </div>
-              {/* 保存为风格模板选项 */}
+              {/* 淇濆瓨涓洪鏍兼ā鏉块€夐」 */}
               <div style={{
                 marginTop: 12, padding: '10px 14px', background: '#ede7f6',
                 borderRadius: 8, border: '1px solid #d1c4e9'
@@ -1442,14 +1063,14 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                     onChange={e => setSaveAsTemplate(e.target.checked)}
                     style={{ width: 16, height: 16 }}
                   />
-                  💾 同时保存为风格模板（可复用到其他爆文）
+                  馃捑 鍚屾椂淇濆瓨涓洪鏍兼ā鏉匡紙鍙鐢ㄥ埌鍏朵粬鐖嗘枃锛?
                 </label>
                 {saveAsTemplate && (
                   <input
                     type="text"
                     value={templateName}
                     onChange={e => setTemplateName(e.target.value)}
-                    placeholder="输入模板名称，如：种草测评风格、情绪共鸣体..."
+                    placeholder="杈撳叆妯℃澘鍚嶇О锛屽锛氱鑽夋祴璇勯鏍笺€佹儏缁叡楦ｄ綋..."
                     style={{
                       marginTop: 8, width: '100%', padding: '6px 10px',
                       borderRadius: 6, border: '1px solid #b39ddb', fontSize: 13,
@@ -1464,13 +1085,13 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                   {saveAsTemplate ? '确认添加 + 保存模板' : '确认添加（含分析结果）'}
                 </button>
                 <button className="btn-secondary" onClick={() => setAnalysisPreview(null)}>
-                  取消
+                  鍙栨秷
                 </button>
               </div>
             </div>
           )}
 
-          {/* 分析错误提示 */}
+          {/* 鍒嗘瀽閿欒鎻愮ず */}
           {analysisError && (
             <div style={{
               background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: 8,
@@ -1480,7 +1101,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             </div>
           )}
 
-          {/* 已保存的风格模板 */}
+          {/* 宸蹭繚瀛樼殑椋庢牸妯℃澘 */}
           {(() => {
             const currentProduct = products.find(p => p.id === refEditing)
             const templates = currentProduct?.styleTemplates || []
@@ -1496,7 +1117,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                     cursor: 'pointer', fontWeight: 600, fontSize: 13, marginBottom: 8
                   }}
                 >
-                  {showTemplateList ? '收起模板列表' : `💾 风格模板 (${enabledCount}/${templates.length} 启用)`}
+                  {showTemplateList ? '鏀惰捣妯℃澘鍒楄〃' : `馃捑 椋庢牸妯℃澘 (${enabledCount}/${templates.length} 鍚敤)`}
                 </button>
                 {showTemplateList && (
                   <div style={{
@@ -1504,7 +1125,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                     padding: 12
                   }}>
                     <p style={{ margin: '0 0 8px', fontSize: 12, color: '#7b1fa2' }}>
-                      启用的模板在批量生成时会自动轮换使用——每篇笔记仅参考 1 个模板，确保多样性。建议至少启用 3 个模板，效果更好。
+                      鍚敤鐨勬ā鏉垮湪鎵归噺鐢熸垚鏃朵細鑷姩杞崲浣跨敤鈥斺€旀瘡绡囩瑪璁颁粎鍙傝€?1 涓ā鏉匡紝纭繚澶氭牱鎬с€傚缓璁惎鐢?鈮? 涓ā鏉挎晥鏋滄渶浣炽€?
                     </p>
                     {templates.map(t => {
                       const isEnabled = t.enabled !== false
@@ -1537,10 +1158,10 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                               className="btn-sm btn-danger"
                               style={{ flexShrink: 0, marginLeft: 8 }}
                               onClick={() => handleDeleteTemplate(refEditing, t.id)}
-                            >删除</button>
+                            >鍒犻櫎</button>
                           </div>
                           <details style={{ marginTop: 6 }}>
-                            <summary style={{ fontSize: 11, color: '#9575cd', cursor: 'pointer' }}>查看分析内容</summary>
+                            <summary style={{ fontSize: 11, color: '#9575cd', cursor: 'pointer' }}>鏌ョ湅鍒嗘瀽鍐呭</summary>
                             <div style={{
                               fontSize: 11, color: '#555', lineHeight: 1.7, marginTop: 4,
                               maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-line',
@@ -1558,13 +1179,13 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             )
           })()}
 
-          {/* 添加新爆文 */}
+          {/* 娣诲姞鏂扮垎鏂?*/}
           <div style={{ marginBottom: 10 }}>
             <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 6 }}>添加参考爆文</label>
             <textarea
               value={refForm.text}
               onChange={e => setRefForm({ text: e.target.value })}
-              placeholder="直接粘贴爆文内容（标题+正文+标签均可）..."
+              placeholder="鐩存帴绮樿创鐖嗘枃鍐呭锛堟爣棰?姝ｆ枃+鏍囩鍧囧彲锛?.."
               rows={8}
               style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.6 }}
               disabled={analyzing}
@@ -1574,7 +1195,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
           <div className="btn-row">
             <button className="btn-primary" onClick={handleAddRef}
               disabled={!refForm.text.trim() || analyzing}>
-              直接添加
+              鐩存帴娣诲姞
             </button>
             <button
               onClick={handleAnalyzeAndAdd}
@@ -1593,7 +1214,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
         </div>
       )}
 
-      {/* 提示词编辑面板 */}
+      {/* 鎻愮ず璇嶇紪杈戦潰鏉?*/}
       {promptEditing && (
         <div ref={promptEditorRef} className="prompt-editor" style={{
           background: '#fafafa', border: '1px solid #e0e0e0', borderRadius: 12,
@@ -1649,10 +1270,10 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
           padding: 20, marginBottom: 16
         }}>
           <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-            SEO设置 - {products.find(p => p.id === seoEditing)?.name}
+            SEO璁剧疆 - {products.find(p => p.id === seoEditing)?.name}
           </h3>
           <p className="hint" style={{ marginBottom: 12, fontSize: 12 }}>
-            配置关键词分层、标签与反堆砌参数。生成时会自动注入，不改变整体文风。
+            閰嶇疆鍏抽敭璇嶅垎灞傘€佹爣绛句笌鍙嶅爢鐮屽弬鏁般€傜敓鎴愭椂浼氳嚜鍔ㄦ敞鍏ワ紝涓嶆敼鍙樻暣浣撴枃椋庛€?
           </p>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
@@ -1693,9 +1314,122 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                 仅复制抓取脚本
               </button>
               <span style={{ fontSize: 11, color: '#64748b' }}>
-                仅抓取小红书联想词/相关搜索/热搜词，自动去重后追加，单次最多 {XHS_MAX_IMPORTED_KEYWORDS} 词
+                自动追加去重到 longTailKeywords 与 longTail 词池，单次最多 {XHS_MAX_IMPORTED_KEYWORDS} 词
               </span>
             </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>词池 core（词|权重|锁定）</label>
+              <textarea
+                rows={5}
+                value={seoForm.corePoolText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, corePoolText: e.target.value }))}
+                placeholder={'中考数学|3|1\n中考数学资料|2|0'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>词池 scene（词|权重|锁定）</label>
+              <textarea
+                rows={5}
+                value={seoForm.scenePoolText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, scenePoolText: e.target.value }))}
+                placeholder={'初三复习|1.5|0\n中考冲刺|1.2|0'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>词池 longTail（词|权重|锁定）</label>
+              <textarea
+                rows={5}
+                value={seoForm.longTailPoolText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, longTailPoolText: e.target.value }))}
+                placeholder={'中考数学压轴题讲解|1.4|0\n中考数学错题整理|1.2|0'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>必选标签 requiredTags</label>
+              <textarea
+                rows={3}
+                value={seoForm.requiredTagsText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, requiredTagsText: e.target.value }))}
+                placeholder={'中考数学\n学霸笔记'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>扩展标签 extendedTags</label>
+              <textarea
+                rows={3}
+                value={seoForm.extendedTagsText}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, extendedTagsText: e.target.value }))}
+                placeholder={'初三复习\n中考冲刺'}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>娉ㄥ叆浣嶇疆</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12 }}>
+              <label><input type="checkbox" checked={seoForm.titleEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, titleEnabled: e.target.checked }))} /> 鏍囬</label>
+              <label><input type="checkbox" checked={seoForm.introEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, introEnabled: e.target.checked }))} /> 正文开头</label>
+              <label><input type="checkbox" checked={seoForm.middleEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, middleEnabled: e.target.checked }))} /> 姝ｆ枃涓</label>
+              <label><input type="checkbox" checked={seoForm.endingEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, endingEnabled: e.target.checked }))} /> 姝ｆ枃缁撳熬</label>
+              <label><input type="checkbox" checked={seoForm.tagsEnabled} onChange={(e) => setSeoForm(prev => ({ ...prev, tagsEnabled: e.target.checked }))} /> 璇濋鏍囩</label>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))', gap: 10, marginBottom: 12 }}>
+            <label style={{ fontSize: 12 }}>
+              鏍囬鏈€澶氬叧閿瘝
+              <input
+                type="number"
+                min={1}
+                max={4}
+                value={seoForm.titleMaxKeywordCount}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, titleMaxKeywordCount: e.target.value }))}
+                style={{ width: '100%', marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+              />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              姝ｆ枃鍗曡瘝鏈€澶ч噸澶?
+              <input
+                type="number"
+                min={1}
+                max={6}
+                value={seoForm.bodyMaxRepeatPerWord}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, bodyMaxRepeatPerWord: e.target.value }))}
+                style={{ width: '100%', marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+              />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              鍚岃瘝鏈€灏忛棿闅?
+              <input
+                type="number"
+                min={0}
+                max={80}
+                value={seoForm.minKeywordGapChars}
+                onChange={(e) => setSeoForm(prev => ({ ...prev, minKeywordGapChars: e.target.value }))}
+                style={{ width: '100%', marginTop: 4, padding: '6px 8px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+              />
+            </label>
+            <label style={{ fontSize: 12, display: 'flex', alignItems: 'end' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
+                <input
+                  type="checkbox"
+                  checked={seoForm.noAdjacentDuplicate}
+                  onChange={(e) => setSeoForm(prev => ({ ...prev, noAdjacentDuplicate: e.target.checked }))}
+                />
+                绂佹鐩搁偦閲嶅
+              </span>
+            </label>
           </div>
 
           {seoKeywordSyncOpen && (
@@ -1713,8 +1447,8 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
               <div style={{ fontSize: 12, color: '#334155', lineHeight: 1.65, marginBottom: 8 }}>
                 <div>1. 点击“自动抓取长尾词”会打开小红书搜索页并尝试自动复制脚本。</div>
-                <div>2. 在新页面先点开搜索框下拉联想词，再按 `F12` 打开控制台执行脚本。</div>
-                <div>3. 执行后会自动切回工具页并自动回填；若失败可点“从剪贴板导入”或手动粘贴 JSON。</div>
+                <div>2. 在新页面按 `F12` 打开控制台，把脚本粘贴执行。</div>
+                <div>3. 正常会自动回填；如果回传失败，把控制台 JSON 粘贴到下方手动导入。</div>
               </div>
 
               <div style={{
@@ -1744,7 +1478,6 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <button className="btn-secondary" onClick={handleCopySeoKeywordScript}>复制抓取脚本</button>
                 <button className="btn-secondary" onClick={handleOpenSeoKeywordSync}>重新打开小红书页</button>
-                <button className="btn-secondary" onClick={handleImportSeoKeywordFromClipboard}>从剪贴板导入</button>
                 {seoKeywordScriptCopied && <span style={{ fontSize: 11, color: '#15803d' }}>脚本已复制到剪贴板</span>}
               </div>
 
@@ -1771,9 +1504,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
           )}
 
           <div className="btn-row">
-            <button className="btn-primary" onClick={handleSaveSeo}>保存SEO设置</button>
-            <button className="btn-danger" onClick={handleClearSeo}>清空SEO设置</button>
-            <button className="btn-secondary" onClick={() => setSeoEditing(null)}>取消</button>
+            <button className="btn-primary" onClick={handleSaveSeo}>淇濆瓨SEO璁剧疆</button>
+            <button className="btn-danger" onClick={handleClearSeo}>娓呯┖SEO璁剧疆</button>
+            <button className="btn-secondary" onClick={() => setSeoEditing(null)}>鍙栨秷</button>
           </div>
         </div>
       )}
@@ -1997,7 +1730,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                         >
                           <img
                             src={img}
-                            alt={`内页图${idx + 1}`}
+                            alt={`鍐呴〉鍥?{idx + 1}`}
                             style={{
                               width: 80, height: 80, objectFit: 'cover',
                               borderRadius: 6, border: '1px solid #ccc',
