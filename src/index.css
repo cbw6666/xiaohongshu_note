@@ -321,10 +321,18 @@ body {
   gap: 8px;
 }
 
+.product-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .item-card {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
   padding: 12px 16px;
   background: var(--bg);
   border-radius: 8px;
@@ -353,6 +361,13 @@ body {
 .item-actions {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.product-inline-editor {
+  width: 100%;
 }
 
 .hint {

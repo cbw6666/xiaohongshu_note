@@ -10,14 +10,36 @@ const splitWords = (input = '') =>
     .map((item) => item.trim())
     .filter(Boolean)
 
+const splitPhraseLines = (input = '') =>
+  String(input || '')
+    .split(/\r?\n|,|，/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
 const joinWords = (list = []) => (Array.isArray(list) ? list.join('\n') : '')
+
+const mergePreviewWords = (...groups) => {
+  const seen = new Set()
+  const merged = []
+  groups.flat().forEach((word) => {
+    const value = String(word || '').trim()
+    if (!value || seen.has(value)) return
+    seen.add(value)
+    merged.push(value)
+  })
+  return merged
+}
 
 const buildSeoForm = (product) => {
   const seoConfig = normalizeSeoConfig(product?.seoConfig || {}, product)
   return {
     seedKeyword: seoConfig.seedKeyword || '',
     coreKeyword: seoConfig.coreKeyword || '',
-    longTailKeywordsText: joinWords(seoConfig.longTailKeywords),
+    longTailKeywordsText: joinWords(
+      Array.isArray(seoConfig.rawSearchTerms) && seoConfig.rawSearchTerms.length > 0
+        ? seoConfig.rawSearchTerms
+        : seoConfig.longTailKeywords,
+    ),
     corePoolText: keywordPoolToText(seoConfig.keywordPools.core),
     scenePoolText: keywordPoolToText(seoConfig.keywordPools.scene),
     longTailPoolText: keywordPoolToText(seoConfig.keywordPools.longTail),
@@ -39,7 +61,8 @@ const buildSeoPayload = (form) => ({
   mode: 'direct',
   seedKeyword: String(form.seedKeyword || '').trim(),
   coreKeyword: String(form.coreKeyword || '').trim(),
-  longTailKeywords: splitWords(form.longTailKeywordsText),
+  rawSearchTerms: splitPhraseLines(form.longTailKeywordsText),
+  longTailKeywords: splitPhraseLines(form.longTailKeywordsText),
   keywordPools: {
     core: keywordTextToPool(form.corePoolText),
     scene: keywordTextToPool(form.scenePoolText),
@@ -755,10 +778,6 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   // 内页图上传
   const innerImageInputRef = useRef(null)
   const [innerImageTarget, setInnerImageTarget] = useState(null) // 当前正在上传内页图的商品ID
-  const refEditorRef = useRef(null)
-  const promptEditorRef = useRef(null)
-  const coverEditorRef = useRef(null)
-  const seoEditorRef = useRef(null)
   // 内页图拖拽排序
   const [dragIndex, setDragIndex] = useState(null)
   const [dragProductId, setDragProductId] = useState(null)
@@ -968,6 +987,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     const hasAnyRule = Boolean(
       normalizedPayload.seedKeyword ||
       normalizedPayload.coreKeyword ||
+      normalizedPayload.rawSearchTerms?.length > 0 ||
       normalizedPayload.longTailKeywords.length > 0 ||
       normalizedPayload.requiredTags.length > 0 ||
       normalizedPayload.extendedTags.length > 0 ||
@@ -1041,7 +1061,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     const sanitized = sanitizeImportedKeywords(payload)
     if (!sanitized.keywords.length) {
       setSeoKeywordStatus('error')
-      setSeoKeywordMessage('未提取到可用长尾词，请更换基础词或使用手动粘贴JSON。')
+      setSeoKeywordMessage('未提取到可用搜索词，请更换基础词或使用手动粘贴JSON。')
       return 0
     }
 
@@ -1053,7 +1073,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
     const fromText = fromManual ? '（手动导入）' : ''
     setSeoKeywordStatus('done')
-    setSeoKeywordMessage(`已导入 ${sanitized.keywords.length} 个长尾词${fromText}，并追加到长尾词与longTail词池。`)
+    setSeoKeywordMessage(`已导入 ${sanitized.keywords.length} 个原始搜索词${fromText}，后续会自动拆词用于标题、正文和标签。`)
     setSeoKeywordManualError('')
     return sanitized.keywords.length
   }
@@ -1102,7 +1122,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     const seed = pickSeoSeedKeyword(seoForm, product)
     if (!seed) {
       setSeoKeywordStatus('error')
-      setSeoKeywordMessage('请先填写基础词或核心词，再抓取长尾词。')
+      setSeoKeywordMessage('请先填写基础词或核心词，再抓取搜索词。')
       return
     }
 
@@ -1230,39 +1250,6 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     setDragProductId(null)
   }
 
-  const scrollToEditor = (editorRef) => {
-    if (!editorRef?.current) return
-    editorRef.current.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-      inline: 'nearest',
-    })
-  }
-
-  useEffect(() => {
-    if (refEditing) {
-      scrollToEditor(refEditorRef)
-    }
-  }, [refEditing])
-
-  useEffect(() => {
-    if (promptEditing) {
-      scrollToEditor(promptEditorRef)
-    }
-  }, [promptEditing])
-
-  useEffect(() => {
-    if (coverEditing) {
-      scrollToEditor(coverEditorRef)
-    }
-  }, [coverEditing])
-
-  useEffect(() => {
-    if (seoEditing) {
-      scrollToEditor(seoEditorRef)
-    }
-  }, [seoEditing])
-
   useEffect(() => {
     if (seoEditing) return
     setSeoKeywordSyncOpen(false)
@@ -1347,309 +1334,326 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     }
   }, [])
 
-  return (
-    <div className="panel">
-      {/* 隐藏的内页图文件上传 input */}
-      <input
-        ref={innerImageInputRef}
-        type="file"
-        multiple
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={handleInnerImageChange}
-      />
-      <h2>📦 商品管理 <span className="panel-sub">- {shop.name}</span></h2>
-      <p className="hint" style={{ marginBottom: 12 }}>商品从千帆导入，可添加爆文参考（支持 AI 分析爆款因子）、定制提示词</p>
+  const renderRefEditor = (product) => (
+    <div className="product-inline-editor" style={{
+      background: '#fff8f0', border: '1px solid #ffcc80', borderRadius: 12,
+      padding: 20, marginTop: 12,
+    }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
+        🔥 爆文参考 - {product?.name}
+      </h3>
+      <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
+        直接粘贴小红书爆款笔记（标题+正文+标签均可），系统会自动分析爆款因子并仿写。可添加多篇参考。
+      </p>
 
-      {/* 爆文参考编辑面板 */}
-      {refEditing && (
-        <div ref={refEditorRef} style={{
-          background: '#fff8f0', border: '1px solid #ffcc80', borderRadius: 12,
-          padding: 20, marginBottom: 16
-        }}>
-          <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-            🔥 爆文参考 - {products.find(p => p.id === refEditing)?.name}
-          </h3>
-          <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            直接粘贴小红书爆款笔记（标题+正文+标签均可），系统会自动分析爆款因子并仿写。可添加多篇参考。
-          </p>
-
-          {/* 已添加的爆文列表 */}
-          {(() => {
-            const refs = products.find(p => p.id === refEditing)?.references || []
-            return refs.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                {refs.map((ref, idx) => {
-                  // 兼容新旧格式：新格式用 ref.text，旧格式拼接 title + content
-                  const displayText = ref.text || [ref.title, ref.content, ref.tags].filter(Boolean).join('\n')
-                  return (
-                    <div key={ref.id} style={{
-                      background: '#fff', border: `1px solid ${ref.analysis ? '#ce93d8' : '#ffe0b2'}`, borderRadius: 8,
-                      padding: '10px 14px', marginBottom: 8, position: 'relative'
+      {(product?.references || []).length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          {(product?.references || []).map((ref, idx) => {
+            const displayText = ref.text || [ref.title, ref.content, ref.tags].filter(Boolean).join('\n')
+            return (
+              <div key={ref.id} style={{
+                background: '#fff', border: `1px solid ${ref.analysis ? '#ce93d8' : '#ffe0b2'}`, borderRadius: 8,
+                padding: '10px 14px', marginBottom: 8, position: 'relative',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                      参考{idx + 1}
+                      {ref.analysis && (
+                        <span style={{ marginLeft: 8, fontSize: 11, color: '#7b1fa2', fontWeight: 600 }}>已分析爆款因子</span>
+                      )}
+                    </div>
+                    <div style={{
+                      fontSize: 12, color: '#666', lineHeight: 1.6,
+                      maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'pre-line',
                     }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                            参考{idx + 1}
-                            {ref.analysis && (
-                              <span style={{ marginLeft: 8, fontSize: 11, color: '#7b1fa2', fontWeight: 600 }}>已分析爆款因子</span>
-                            )}
+                      {displayText.slice(0, 150)}{displayText.length > 150 ? '...' : ''}
+                    </div>
+                  </div>
+                  <button
+                    className="btn-sm btn-danger"
+                    style={{ marginLeft: 10, flexShrink: 0 }}
+                    onClick={() => handleDeleteRef(product.id, ref.id)}
+                  >删除</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {analysisPreview && (
+        <div style={{
+          background: '#f3e5f5', border: '1px solid #ce93d8', borderRadius: 10,
+          padding: 16, marginBottom: 14,
+        }}>
+          <h4 style={{ margin: '0 0 8px', fontSize: 14, color: '#7b1fa2' }}>🔍 爆款因子分析结果</h4>
+          <div style={{
+            fontSize: 12, color: '#444', lineHeight: 1.8,
+            maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-line',
+            background: '#fff', borderRadius: 8, padding: 12,
+          }}>
+            {analysisPreview.analysis}
+          </div>
+          <div style={{
+            marginTop: 12, padding: '10px 14px', background: '#ede7f6',
+            borderRadius: 8, border: '1px solid #d1c4e9',
+          }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={saveAsTemplate}
+                onChange={e => setSaveAsTemplate(e.target.checked)}
+                style={{ width: 16, height: 16 }}
+              />
+              💾 同时保存为风格模板（可复用到其他爆文）
+            </label>
+            {saveAsTemplate && (
+              <input
+                type="text"
+                value={templateName}
+                onChange={e => setTemplateName(e.target.value)}
+                placeholder="输入模板名称，如：种草测评风格、情绪共鸣体..."
+                style={{
+                  marginTop: 8, width: '100%', padding: '6px 10px',
+                  borderRadius: 6, border: '1px solid #b39ddb', fontSize: 13,
+                  outline: 'none',
+                }}
+              />
+            )}
+          </div>
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <button className="btn-primary" onClick={handleConfirmAnalysis}
+              disabled={saveAsTemplate && !templateName.trim()}>
+              {saveAsTemplate ? '确认添加 + 保存模板' : '确认添加（含分析结果）'}
+            </button>
+            <button className="btn-secondary" onClick={() => setAnalysisPreview(null)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {analysisError && (
+        <div style={{
+          background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: 8,
+          padding: '8px 12px', marginBottom: 10, fontSize: 12, color: '#c62828',
+        }}>
+          {analysisError}
+        </div>
+      )}
+
+      {(product?.styleTemplates || []).length > 0 && (() => {
+        const templates = product?.styleTemplates || []
+        const enabledCount = templates.filter(t => t.enabled !== false).length
+        return (
+          <div style={{ marginBottom: 14 }}>
+            <button
+              onClick={() => setShowTemplateList(!showTemplateList)}
+              style={{
+                padding: '6px 14px', borderRadius: 8, border: '1px solid #b39ddb',
+                background: showTemplateList ? '#ede7f6' : '#f3e5f5', color: '#7b1fa2',
+                cursor: 'pointer', fontWeight: 600, fontSize: 13, marginBottom: 8,
+              }}
+            >
+              {showTemplateList ? '收起模板列表' : `💾 风格模板 (${enabledCount}/${templates.length} 启用)`}
+            </button>
+            {showTemplateList && (
+              <div style={{
+                background: '#faf5ff', border: '1px solid #d1c4e9', borderRadius: 10,
+                padding: 12,
+              }}>
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: '#7b1fa2' }}>
+                  启用的模板在批量生成时会自动轮换使用。每篇笔记仅参考 1 个模板，确保多样性。建议至少启用 3 个模板，效果更好。
+                </p>
+                {templates.map(t => {
+                  const isEnabled = t.enabled !== false
+                  return (
+                    <div key={t.id} style={{
+                      background: isEnabled ? '#fff' : '#f5f5f5',
+                      border: `1px solid ${isEnabled ? '#e1bee7' : '#e0e0e0'}`,
+                      borderRadius: 8, padding: '8px 12px', marginBottom: 6,
+                      opacity: isEnabled ? 1 : 0.65,
+                      transition: 'all 0.2s',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={() => handleToggleTemplate(product.id, t.id)}
+                            style={{ width: 16, height: 16, accentColor: '#7b1fa2' }}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: isEnabled ? '#6a1b9a' : '#999' }}>
+                              {t.name}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
+                              来源: {t.sourceText?.slice(0, 50)}{(t.sourceText?.length || 0) > 50 ? '...' : ''}
+                            </div>
                           </div>
-                          <div style={{
-                            fontSize: 12, color: '#666', lineHeight: 1.6,
-                            maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis',
-                            whiteSpace: 'pre-line'
-                          }}>
-                            {displayText.slice(0, 150)}{displayText.length > 150 ? '...' : ''}
-                          </div>
-                        </div>
+                        </label>
                         <button
                           className="btn-sm btn-danger"
-                          style={{ marginLeft: 10, flexShrink: 0 }}
-                          onClick={() => handleDeleteRef(refEditing, ref.id)}
+                          style={{ flexShrink: 0, marginLeft: 8 }}
+                          onClick={() => handleDeleteTemplate(product.id, t.id)}
                         >删除</button>
                       </div>
+                      <details style={{ marginTop: 6 }}>
+                        <summary style={{ fontSize: 11, color: '#9575cd', cursor: 'pointer' }}>查看分析内容</summary>
+                        <div style={{
+                          fontSize: 11, color: '#555', lineHeight: 1.7, marginTop: 4,
+                          maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-line',
+                          background: '#f9f5ff', borderRadius: 6, padding: 8,
+                        }}>
+                          {t.analysis}
+                        </div>
+                      </details>
                     </div>
                   )
                 })}
               </div>
-            )
-          })()}
+            )}
+          </div>
+        )
+      })()}
 
-          {/* AI 分析结果预览 */}
-          {analysisPreview && (
-            <div style={{
-              background: '#f3e5f5', border: '1px solid #ce93d8', borderRadius: 10,
-              padding: 16, marginBottom: 14
-            }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, color: '#7b1fa2' }}>🔍 爆款因子分析结果</h4>
-              <div style={{
-                fontSize: 12, color: '#444', lineHeight: 1.8,
-                maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-line',
-                background: '#fff', borderRadius: 8, padding: 12
-              }}>
-                {analysisPreview.analysis}
-              </div>
-              {/* 保存为风格模板选项 */}
-              <div style={{
-                marginTop: 12, padding: '10px 14px', background: '#ede7f6',
-                borderRadius: 8, border: '1px solid #d1c4e9'
-              }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-                  <input
-                    type="checkbox"
-                    checked={saveAsTemplate}
-                    onChange={e => setSaveAsTemplate(e.target.checked)}
-                    style={{ width: 16, height: 16 }}
-                  />
-                  💾 同时保存为风格模板（可复用到其他爆文）
-                </label>
-                {saveAsTemplate && (
-                  <input
-                    type="text"
-                    value={templateName}
-                    onChange={e => setTemplateName(e.target.value)}
-                    placeholder="输入模板名称，如：种草测评风格、情绪共鸣体..."
-                    style={{
-                      marginTop: 8, width: '100%', padding: '6px 10px',
-                      borderRadius: 6, border: '1px solid #b39ddb', fontSize: 13,
-                      outline: 'none'
-                    }}
-                  />
-                )}
-              </div>
-              <div className="btn-row" style={{ marginTop: 12 }}>
-                <button className="btn-primary" onClick={handleConfirmAnalysis}
-                  disabled={saveAsTemplate && !templateName.trim()}>
-                  {saveAsTemplate ? '确认添加 + 保存模板' : '确认添加（含分析结果）'}
-                </button>
-                <button className="btn-secondary" onClick={() => setAnalysisPreview(null)}>
-                  取消
-                </button>
-              </div>
-            </div>
-          )}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 6 }}>添加参考爆文</label>
+        <textarea
+          value={refForm.text}
+          onChange={e => setRefForm({ text: e.target.value })}
+          placeholder="直接粘贴爆文内容（标题+正文+标签均可）..."
+          rows={8}
+          style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.6 }}
+          disabled={analyzing}
+        />
+      </div>
 
-          {/* 分析错误提示 */}
-          {analysisError && (
-            <div style={{
-              background: '#ffebee', border: '1px solid #ef9a9a', borderRadius: 8,
-              padding: '8px 12px', marginBottom: 10, fontSize: 12, color: '#c62828'
-            }}>
-              {analysisError}
-            </div>
-          )}
+      <div className="btn-row">
+        <button className="btn-primary" onClick={handleAddRef}
+          disabled={!refForm.text.trim() || analyzing}>
+          直接添加
+        </button>
+        <button
+          onClick={handleAnalyzeAndAdd}
+          disabled={!refForm.text.trim() || analyzing}
+          style={{
+            padding: '8px 16px', borderRadius: 8, border: '1px solid #ce93d8',
+            background: analyzing ? '#f3e5f5' : '#7b1fa2', color: analyzing ? '#7b1fa2' : '#fff',
+            cursor: (!refForm.text.trim() || analyzing) ? 'not-allowed' : 'pointer',
+            fontWeight: 600, fontSize: 13,
+          }}
+        >
+          {analyzing ? 'AI 分析中...' : 'AI 分析后添加'}
+        </button>
+        <button className="btn-secondary" onClick={() => setRefEditing(null)}>完成</button>
+      </div>
+    </div>
+  )
 
-          {/* 已保存的风格模板 */}
-          {(() => {
-            const currentProduct = products.find(p => p.id === refEditing)
-            const templates = currentProduct?.styleTemplates || []
-            if (templates.length === 0) return null
-            const enabledCount = templates.filter(t => t.enabled !== false).length
-            return (
-              <div style={{ marginBottom: 14 }}>
-                <button
-                  onClick={() => setShowTemplateList(!showTemplateList)}
+  const renderPromptEditor = (product) => (
+    <div className="product-inline-editor prompt-editor" style={{
+      background: '#fafafa', border: '1px solid #e0e0e0', borderRadius: 12,
+      padding: 20, marginTop: 12,
+    }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
+        自定义提示词 - {product?.name}
+      </h3>
+      <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
+        这里填写的是补充要求，不会替换系统模板。支持变量：
+        <code>{'{name}'}</code> <code>{'{description}'}</code> <code>{'{audience}'}</code> <code>{'{sellingPoints}'}</code>
+      </p>
+
+      <div style={{
+        background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 8,
+        padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#6d4c00', lineHeight: 1.8,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>建议补充（避免重复写基础规则）：</div>
+        <div>- 人设身份：例如“上岸学长”“一线老师”。</div>
+        <div>- 行业术语：你所在赛道常用词、黑话。</div>
+        <div>- 必提/必避词：正文里必须出现或必须规避的词。</div>
+        <div>- 转化偏好：你希望的结尾引导方式。</div>
+        <div>- 资料细节：资料目录、页数、适用人群。</div>
+        <div>- 时效信息：当前考试节点、热点方向。</div>
+      </div>
+
+      <textarea
+        value={promptForm.customSystemPrompt}
+        onChange={e => setPromptForm(prev => ({ ...prev, customSystemPrompt: e.target.value }))}
+        placeholder={'把你的补充要求直接贴在这里，例如：\n\n请以“上岸学长”口吻写，语气真实不鸡汤。\n正文必须提到“知识框架”和“思维导图”。\n不要出现某品牌名。\n结尾用“点击下方卡片直接领取”做引导。'}
+        rows={10}
+        style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}
+      />
+
+      <div style={{
+        background: '#f5f5f5', borderRadius: 8, padding: '8px 12px',
+        marginBottom: 12, fontSize: 11, color: '#888', lineHeight: 1.7,
+      }}>
+        内置已包含：标题长度、正文长度、话题数量、合规约束、去AI味等基础规则；这里只写你的补充要求即可。
+      </div>
+      <div className="btn-row">
+        <button className="btn-primary" onClick={handleSavePrompt}>保存补充提示词</button>
+        <button className="btn-secondary" onClick={handleClearPrompt}>清空（仅用内置）</button>
+        <button className="btn-secondary" onClick={() => { setPromptEditing(null) }}>取消</button>
+      </div>
+    </div>
+  )
+
+  const renderSeoEditor = (product) => (
+    (() => {
+      const previewSeo = normalizeSeoConfig(buildSeoPayload(seoForm), product)
+      const highIntentPreview = mergePreviewWords(
+        previewSeo.fragmentBuckets.title.map((item) => item.word),
+        previewSeo.fragmentBuckets.body.map((item) => item.word),
+      )
+      const weakPreview = previewSeo.fragmentBuckets.weak.map((item) => item.word)
+      const renderPreviewGroup = (title, items, tone, emptyText) => (
+        <div style={{
+          border: `1px solid ${tone.border}`,
+          background: tone.background,
+          borderRadius: 10,
+          padding: 10,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
+            <strong style={{ fontSize: 12, color: tone.title }}>{title}</strong>
+            <span style={{ fontSize: 11, color: tone.count }}>{items.length} 个</span>
+          </div>
+          {items.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {items.map((item) => (
+                <span
+                  key={`${title}-${item}`}
                   style={{
-                    padding: '6px 14px', borderRadius: 8, border: '1px solid #b39ddb',
-                    background: showTemplateList ? '#ede7f6' : '#f3e5f5', color: '#7b1fa2',
-                    cursor: 'pointer', fontWeight: 600, fontSize: 13, marginBottom: 8
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    color: tone.text,
+                    background: tone.badge,
+                    border: `1px solid ${tone.badgeBorder}`,
+                    borderRadius: 999,
+                    padding: '4px 8px',
                   }}
                 >
-                  {showTemplateList ? '收起模板列表' : `💾 风格模板 (${enabledCount}/${templates.length} 启用)`}
-                </button>
-                {showTemplateList && (
-                  <div style={{
-                    background: '#faf5ff', border: '1px solid #d1c4e9', borderRadius: 10,
-                    padding: 12
-                  }}>
-                    <p style={{ margin: '0 0 8px', fontSize: 12, color: '#7b1fa2' }}>
-                      启用的模板在批量生成时会自动轮换使用——每篇笔记仅参考 1 个模板，确保多样性。建议至少启用 3 个模板，效果更好。
-                    </p>
-                    {templates.map(t => {
-                      const isEnabled = t.enabled !== false
-                      return (
-                        <div key={t.id} style={{
-                          background: isEnabled ? '#fff' : '#f5f5f5',
-                          border: `1px solid ${isEnabled ? '#e1bee7' : '#e0e0e0'}`,
-                          borderRadius: 8, padding: '8px 12px', marginBottom: 6,
-                          opacity: isEnabled ? 1 : 0.65,
-                          transition: 'all 0.2s'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={isEnabled}
-                                onChange={() => handleToggleTemplate(refEditing, t.id)}
-                                style={{ width: 16, height: 16, accentColor: '#7b1fa2' }}
-                              />
-                              <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: isEnabled ? '#6a1b9a' : '#999' }}>
-                                  {t.name}
-                                </div>
-                                <div style={{ fontSize: 11, color: '#888', marginTop: 1 }}>
-                                  鏉ユ簮: {t.sourceText?.slice(0, 50)}{(t.sourceText?.length || 0) > 50 ? '...' : ''}
-                                </div>
-                              </div>
-                            </label>
-                            <button
-                              className="btn-sm btn-danger"
-                              style={{ flexShrink: 0, marginLeft: 8 }}
-                              onClick={() => handleDeleteTemplate(refEditing, t.id)}
-                            >删除</button>
-                          </div>
-                          <details style={{ marginTop: 6 }}>
-                            <summary style={{ fontSize: 11, color: '#9575cd', cursor: 'pointer' }}>查看分析内容</summary>
-                            <div style={{
-                              fontSize: 11, color: '#555', lineHeight: 1.7, marginTop: 4,
-                              maxHeight: 150, overflow: 'auto', whiteSpace: 'pre-line',
-                              background: '#f9f5ff', borderRadius: 6, padding: 8
-                            }}>
-                              {t.analysis}
-                            </div>
-                          </details>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-
-          {/* 添加新爆文 */}
-          <div style={{ marginBottom: 10 }}>
-            <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 6 }}>添加参考爆文</label>
-            <textarea
-              value={refForm.text}
-              onChange={e => setRefForm({ text: e.target.value })}
-              placeholder="直接粘贴爆文内容（标题+正文+标签均可）..."
-              rows={8}
-              style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.6 }}
-              disabled={analyzing}
-            />
-          </div>
-
-          <div className="btn-row">
-            <button className="btn-primary" onClick={handleAddRef}
-              disabled={!refForm.text.trim() || analyzing}>
-              直接添加
-            </button>
-            <button
-              onClick={handleAnalyzeAndAdd}
-              disabled={!refForm.text.trim() || analyzing}
-              style={{
-                padding: '8px 16px', borderRadius: 8, border: '1px solid #ce93d8',
-                background: analyzing ? '#f3e5f5' : '#7b1fa2', color: analyzing ? '#7b1fa2' : '#fff',
-                cursor: (!refForm.text.trim() || analyzing) ? 'not-allowed' : 'pointer',
-                fontWeight: 600, fontSize: 13
-              }}
-            >
-              {analyzing ? 'AI 分析中...' : 'AI 分析后添加'}
-            </button>
-            <button className="btn-secondary" onClick={() => setRefEditing(null)}>瀹屾垚</button>
-          </div>
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.6 }}>
+              {emptyText}
+            </div>
+          )}
         </div>
-      )}
+      )
 
-      {/* 提示词编辑面板 */}
-      {promptEditing && (
-        <div ref={promptEditorRef} className="prompt-editor" style={{
-          background: '#fafafa', border: '1px solid #e0e0e0', borderRadius: 12,
-          padding: 20, marginBottom: 16
-        }}>
-          <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-            自定义提示词 - {products.find(p => p.id === promptEditing)?.name}
-          </h3>
-          <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            这里填写的是补充要求，不会替换系统模板。支持变量：
-            <code>{'{name}'}</code> <code>{'{description}'}</code> <code>{'{audience}'}</code> <code>{'{sellingPoints}'}</code>
-          </p>
-
-          <div style={{
-            background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 8,
-            padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#6d4c00', lineHeight: 1.8
-          }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>建议补充（避免重复写基础规则）：</div>
-            <div>- 人设身份：例如“上岸学长”“一线老师”。</div>
-            <div>- 行业术语：你所在赛道常用词、黑话。</div>
-            <div>- 必提/必避词：正文里必须出现或必须规避的词。</div>
-            <div>- 转化偏好：你希望的结尾引导方式。</div>
-            <div>- 资料细节：资料目录、页数、适用人群。</div>
-            <div>- 时效信息：当前考试节点、热点方向。</div>
-          </div>
-
-          <textarea
-            value={promptForm.customSystemPrompt}
-            onChange={e => setPromptForm(prev => ({ ...prev, customSystemPrompt: e.target.value }))}
-            placeholder={'把你的补充要求直接贴在这里，例如：\n\n请以“上岸学长”口吻写，语气真实不鸡汤。\n正文必须提到“知识框架”和“思维导图”。\n不要出现某品牌名。\n结尾用“点击下方卡片直接领取”做引导。'}
-            rows={10}
-            style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}
-          />
-
-          <div style={{
-            background: '#f5f5f5', borderRadius: 8, padding: '8px 12px',
-            marginBottom: 12, fontSize: 11, color: '#888', lineHeight: 1.7
-          }}>
-            内置已包含：标题长度、正文长度、话题数量、合规约束、去AI味等基础规则；这里只写你的补充要求即可。
-          </div>
-          <div className="btn-row">
-            <button className="btn-primary" onClick={handleSavePrompt}>保存补充提示词</button>
-            <button className="btn-secondary" onClick={handleClearPrompt}>清空（仅用内置）</button>
-            <button className="btn-secondary" onClick={() => { setPromptEditing(null) }}>取消</button>
-          </div>
-        </div>
-      )}
-
-      {/* 灏侀潰鑷畾涔夌紪杈戦潰鏉?*/}
-      {seoEditing && (
-        <div ref={seoEditorRef} style={{
+      return (
+        <div className="product-inline-editor" style={{
           background: '#f4f8ff', border: '1px solid #b6d4fe', borderRadius: 12,
-          padding: 20, marginBottom: 16
+          padding: 20, marginTop: 12,
         }}>
           <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-            SEO设置 - {products.find(p => p.id === seoEditing)?.name}
+            SEO设置 - {product?.name}
           </h3>
           <p className="hint" style={{ marginBottom: 12, fontSize: 12 }}>
             配置关键词分层、标签与反堆砌参数。生成时会自动注入，不改变整体文风。
@@ -1677,12 +1681,12 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
           </div>
 
           <div style={{ marginBottom: 10 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>长尾词 longTailKeywords（每行一个）</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>原始搜索词 rawSearchTerms（每行一个，系统自动拆词）</label>
             <textarea
               rows={4}
               value={seoForm.longTailKeywordsText}
               onChange={(e) => setSeoForm(prev => ({ ...prev, longTailKeywordsText: e.target.value }))}
-              placeholder={'中考数学提分\n中考数学资料\n中考数学压轴题'}
+              placeholder={'系统集成项目管理师中级\n系统集成项目管理工程师怎么备考\n系统集成备考攻略'}
               style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, fontFamily: 'monospace' }}
             />
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 }}>
@@ -1693,8 +1697,59 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                 仅复制抓取脚本
               </button>
               <span style={{ fontSize: 11, color: '#64748b' }}>
-                仅抓取小红书联想词/相关搜索/热搜词，自动去重后追加，单次最多 {XHS_MAX_IMPORTED_KEYWORDS} 词
+                仅抓取小红书联想词/相关搜索/热搜词，自动去重后追加；后续会自动拆词并用于标题、正文、标签，单次最多 {XHS_MAX_IMPORTED_KEYWORDS} 词
               </span>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>系统拆词预览（只读）</div>
+            <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.6, marginBottom: 8 }}>
+              保存时不会单独写入这些预览字段；系统会根据当前原始搜索词自动重新计算。
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+              {renderPreviewGroup(
+                '清洗后原始搜索词',
+                previewSeo.rawSearchTerms,
+                {
+                  border: '#bfdbfe',
+                  background: '#eff6ff',
+                  title: '#1d4ed8',
+                  count: '#64748b',
+                  text: '#1e3a8a',
+                  badge: '#dbeafe',
+                  badgeBorder: '#93c5fd',
+                },
+                '这里会显示系统最终保留的完整搜索句。',
+              )}
+              {renderPreviewGroup(
+                '高意图片段（标题 / 正文优先）',
+                highIntentPreview,
+                {
+                  border: '#bbf7d0',
+                  background: '#f0fdf4',
+                  title: '#15803d',
+                  count: '#64748b',
+                  text: '#166534',
+                  badge: '#dcfce7',
+                  badgeBorder: '#86efac',
+                },
+                '系统会从完整搜索词里自动拆出可用于标题和正文的高意图片段。',
+              )}
+              {renderPreviewGroup(
+                '弱相关词池（仅标签兜底）',
+                weakPreview,
+                {
+                  border: '#fde68a',
+                  background: '#fffbeb',
+                  title: '#b45309',
+                  count: '#64748b',
+                  text: '#92400e',
+                  badge: '#fef3c7',
+                  badgeBorder: '#fcd34d',
+                },
+                '弱相关词不会进标题和正文，只会在标签兜底时少量使用。',
+              )}
             </div>
           </div>
 
@@ -1707,7 +1762,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
               padding: 12,
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <strong style={{ fontSize: 13 }}>长尾词自动抓取（脚本模式）</strong>
+                <strong style={{ fontSize: 13 }}>原始搜索词自动抓取（脚本模式）</strong>
                 <button className="btn-secondary" onClick={closeSeoKeywordSync}>收起</button>
               </div>
 
@@ -1725,7 +1780,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                 padding: '6px 10px',
                 marginBottom: 8,
               }}>
-                当前基础词：{seoKeywordSeed || pickSeoSeedKeyword(seoForm, products.find((item) => item.id === seoEditing))}
+                当前基础词：{seoKeywordSeed || pickSeoSeedKeyword(seoForm, product)}
               </div>
 
               {seoKeywordMessage && (
@@ -1776,111 +1831,125 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             <button className="btn-secondary" onClick={() => setSeoEditing(null)}>取消</button>
           </div>
         </div>
-      )}
+      )
+    })()
+  )
 
-      {coverEditing && (
-        <div ref={coverEditorRef} style={{
-          background: '#f0f7ff', border: '1px solid #90caf9', borderRadius: 12,
-          padding: 20, marginBottom: 16
-        }}>
-          <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-            自定义封面 - {products.find(p => p.id === coverEditing)?.name}
-          </h3>
-          <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-            填写后批量生成会优先使用你的封面内容；留空则继续使用 AI 自动生成。
-          </p>
+  const renderCoverEditor = (product) => (
+    <div className="product-inline-editor" style={{
+      background: '#f0f7ff', border: '1px solid #90caf9', borderRadius: 12,
+      padding: 20, marginTop: 12,
+    }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
+        自定义封面 - {product?.name}
+      </h3>
+      <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
+        填写后批量生成会优先使用你的封面内容；留空则继续使用 AI 自动生成。
+      </p>
 
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
-              封面主标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 8-18 字，可回车换行）</span>
-            </label>
-            <textarea
-              value={coverForm.coverTitle}
-              onChange={e => setCoverForm(prev => ({ ...prev, coverTitle: e.target.value }))}
-              placeholder={'例如：逼自己做自媒体的第一天\n建议先收藏'}
-              maxLength={50}
-              rows={3}
-              style={{
-                width: '100%', padding: '8px 12px', borderRadius: 8,
-                border: '1px solid #90caf9', fontSize: 13, outline: 'none',
-                resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5
-              }}
-            />
-            <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-              {coverForm.coverTitle.replace(/\n/g, '').length}字（不含换行）
-            </div>
-          </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
+          封面主标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 8-18 字，可回车换行）</span>
+        </label>
+        <textarea
+          value={coverForm.coverTitle}
+          onChange={e => setCoverForm(prev => ({ ...prev, coverTitle: e.target.value }))}
+          placeholder={'例如：逼自己做自媒体的第一天\n建议先收藏'}
+          maxLength={50}
+          rows={3}
+          style={{
+            width: '100%', padding: '8px 12px', borderRadius: 8,
+            border: '1px solid #90caf9', fontSize: 13, outline: 'none',
+            resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5,
+          }}
+        />
+        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+          {coverForm.coverTitle.replace(/\n/g, '').length}字（不含换行）
+        </div>
+      </div>
 
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
-              封面副标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 15 字以内）</span>
-            </label>
-            <input
-              type="text"
-              value={coverForm.coverSubtitle}
-              onChange={e => setCoverForm(prev => ({ ...prev, coverSubtitle: e.target.value }))}
-              placeholder="例如：万能模板 + 高分框架"
-              maxLength={25}
-              style={{
-                width: '100%', padding: '8px 12px', borderRadius: 8,
-                border: '1px solid #90caf9', fontSize: 13, outline: 'none'
-              }}
-            />
-            <div style={{ fontSize: 11, color: coverForm.coverSubtitle.length > 15 ? '#e53935' : '#888', marginTop: 2 }}>
-              {coverForm.coverSubtitle.length}/25字
-            </div>
-          </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
+          封面副标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 15 字以内）</span>
+        </label>
+        <input
+          type="text"
+          value={coverForm.coverSubtitle}
+          onChange={e => setCoverForm(prev => ({ ...prev, coverSubtitle: e.target.value }))}
+          placeholder="例如：万能模板 + 高分框架"
+          maxLength={25}
+          style={{
+            width: '100%', padding: '8px 12px', borderRadius: 8,
+            border: '1px solid #90caf9', fontSize: 13, outline: 'none',
+          }}
+        />
+        <div style={{ fontSize: 11, color: coverForm.coverSubtitle.length > 15 ? '#e53935' : '#888', marginTop: 2 }}>
+          {coverForm.coverSubtitle.length}/25字
+        </div>
+      </div>
 
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
-              指定封面模板 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（可选）</span>
-            </label>
-            <select
-              value={coverForm.coverTemplateId}
-              onChange={e => {
-                setCoverForm(prev => ({ ...prev, coverTemplateId: e.target.value }))
-                if (e.target.value) setCoverPreviewTplId(e.target.value)
-              }}
-              style={{
-                width: '100%', padding: '8px 12px', borderRadius: 8,
-                border: '1px solid #90caf9', fontSize: 13
-              }}
-            >
-              <option value="">不指定（按批量生成设置）</option>
-              {COVER_TEMPLATES.map(t => (
-                <option key={t.id} value={t.id}>{t.name} - {t.desc}</option>
-              ))}
-            </select>
-          </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
+          指定封面模板 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（可选）</span>
+        </label>
+        <select
+          value={coverForm.coverTemplateId}
+          onChange={e => {
+            setCoverForm(prev => ({ ...prev, coverTemplateId: e.target.value }))
+            if (e.target.value) setCoverPreviewTplId(e.target.value)
+          }}
+          style={{
+            width: '100%', padding: '8px 12px', borderRadius: 8,
+            border: '1px solid #90caf9', fontSize: 13,
+          }}
+        >
+          <option value="">不指定（按批量生成设置）</option>
+          {COVER_TEMPLATES.map(t => (
+            <option key={t.id} value={t.id}>{t.name} - {t.desc}</option>
+          ))}
+        </select>
+      </div>
 
-          {coverForm.coverTitle && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>实时预览</div>
-              <CoverCanvas
-                templateId={coverForm.coverTemplateId || coverPreviewTplId}
-                data={{ title: coverForm.coverTitle, subtitle: coverForm.coverSubtitle }}
-                colorIdx={0}
-                width={200}
-              />
-            </div>
-          )}
-
-          <div className="btn-row" style={{ marginTop: 16 }}>
-            <button className="btn-primary" onClick={handleSaveCover}
-              disabled={!coverForm.coverTitle.trim() && !coverForm.coverSubtitle.trim() && !coverForm.coverTemplateId}>
-              保存封面设置
-            </button>
-            {(products.find(p => p.id === coverEditing)?.customCoverTitle ||
-              products.find(p => p.id === coverEditing)?.customCoverSubtitle ||
-              products.find(p => p.id === coverEditing)?.customCoverTemplateId) && (
-              <button className="btn-danger" onClick={handleClearCover}>
-                清除自定义（恢复 AI 生成）
-              </button>
-            )}
-            <button className="btn-secondary" onClick={() => setCoverEditing(null)}>取消</button>
-          </div>
+      {coverForm.coverTitle && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>实时预览</div>
+          <CoverCanvas
+            templateId={coverForm.coverTemplateId || coverPreviewTplId}
+            data={{ title: coverForm.coverTitle, subtitle: coverForm.coverSubtitle }}
+            colorIdx={0}
+            width={200}
+          />
         </div>
       )}
+
+      <div className="btn-row" style={{ marginTop: 16 }}>
+        <button className="btn-primary" onClick={handleSaveCover}
+          disabled={!coverForm.coverTitle.trim() && !coverForm.coverSubtitle.trim() && !coverForm.coverTemplateId}>
+          保存封面设置
+        </button>
+        {(product?.customCoverTitle || product?.customCoverSubtitle || product?.customCoverTemplateId) && (
+          <button className="btn-danger" onClick={handleClearCover}>
+            清除自定义（恢复 AI 生成）
+          </button>
+        )}
+        <button className="btn-secondary" onClick={() => setCoverEditing(null)}>取消</button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="panel">
+      {/* 隐藏的内页图文件上传 input */}
+      <input
+        ref={innerImageInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleInnerImageChange}
+      />
+      <h2>📦 商品管理 <span className="panel-sub">- {shop.name}</span></h2>
+      <p className="hint" style={{ marginBottom: 12 }}>商品从千帆导入，可添加爆文参考（支持 AI 分析爆款因子）、定制提示词</p>
 
       {products.length > 0 && (
         <div className="item-list">
@@ -1894,6 +1963,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             const hasSeoConfig = Boolean(
               normalizedSeo.seedKeyword ||
               normalizedSeo.coreKeyword ||
+              normalizedSeo.rawSearchTerms?.length > 0 ||
               normalizedSeo.longTailKeywords.length > 0 ||
               normalizedSeo.requiredTags.length > 0 ||
               normalizedSeo.extendedTags.length > 0 ||
@@ -1903,136 +1973,142 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             )
             const innerImages = innerImagesMap[p.id] || []
             return (
-              <div key={p.id} className="item-card">
-                <div className="item-info">
-                  <strong>{p.name}</strong>
-                  <span className="item-meta">
-                    {p.productId && <span className="product-id">ID: {p.productId}</span>}
-                    {refCount > 0 && (
-                      <span style={{ marginLeft: 6, color: '#e65100', fontWeight: 600 }}>
-                        爆文参考 {refCount} 篇
-                        {hasAnalysis && <span style={{ color: '#7b1fa2' }}>（含AI分析）</span>}
-                        {refCount < 3 && <span style={{ color: '#f57c00', fontWeight: 400, fontSize: 11 }}>（建议≥3篇）</span>}
-                      </span>
-                    )}
-                    {refCount === 0 && (
-                      <span style={{ marginLeft: 6, color: '#bbb', fontSize: 11 }}>
-                        建议添加至少 3 篇爆文参考以提高多样性
-                      </span>
-                    )}
-                    {templateCount > 0 && (
-                      <span style={{ marginLeft: 6, color: '#6a1b9a', fontWeight: 600 }}>
-                        模板 {enabledTemplateCount}/{templateCount} 启用
-                      </span>
-                    )}
-                    {hasCover && (
-                      <span style={{ marginLeft: 6, color: '#1565c0', fontWeight: 600 }}>已定制封面</span>
-                    )}
-                    {(p.customSystemPrompt || p.customUserPrompt) && (
-                      <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>已定制提示词</span>
-                    )}
-                    {hasSeoConfig && (
-                      <span style={{ marginLeft: 6, color: '#0369a1', fontWeight: 600 }}>SEO已配置</span>
-                    )}
-                    {innerImages.length > 0 && (
-                      <span style={{ marginLeft: 6, color: '#00897b', fontWeight: 600 }}>内页图 {innerImages.length} 张</span>
-                    )}
-                  </span>
-                </div>
-                <div className="item-actions">
-                  <button className="btn-sm" onClick={() => handleInnerImageUpload(p.id)}
-                    style={{ background: innerImages.length > 0 ? '#e0f2f1' : undefined }}>
-                    {innerImages.length > 0 ? `内页图(${innerImages.length})` : '添加内页图'}
-                  </button>
-                  <button className="btn-sm" onClick={() => handleOpenRef(p)}
-                    style={{ background: refCount > 0 ? '#fff3e0' : undefined }}>
-                    {refCount > 0 ? `爆文参考(${refCount})` : '爆文参考'}
-                  </button>
-                  <button className="btn-sm" onClick={() => handleEditCover(p)}
-                    style={{ background: hasCover ? '#e3f2fd' : undefined }}>
-                    {hasCover ? '编辑封面' : '自定义封面'}
-                  </button>
-                  <button className="btn-sm" onClick={() => handleEditPrompt(p)}
-                    style={{ background: (p.customSystemPrompt || p.customUserPrompt) ? '#fff3e0' : undefined }}>
-                    {(p.customSystemPrompt || p.customUserPrompt) ? '编辑提示词' : '定制提示词'}
-                  </button>
-                  <button className="btn-sm" onClick={() => handleEditSeo(p)}
-                    style={{ background: hasSeoConfig ? '#e0f2fe' : undefined }}>
-                    {hasSeoConfig ? '编辑SEO' : 'SEO设置'}
-                  </button>
-                  <button className="btn-sm btn-danger" onClick={() => handleDelete(p.id)}>删除</button>
-                </div>
-                {/* 内页图预览 */}
-                {innerImages.length > 0 && (
-                  <div style={{
-                    marginTop: 10, padding: '10px 12px', background: '#f0faf8',
-                    borderRadius: 8, border: '1px solid #b2dfdb'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#00897b' }}>
-                        内页图 ({innerImages.length} 张) - 可拖拽调整顺序，刷新后需重新上传
-                      </span>
-                      <button
-                        className="btn-sm btn-danger"
-                        style={{ fontSize: 11, padding: '2px 8px' }}
-                        onClick={() => handleClearInnerImages(p.id)}
-                      >清空全部</button>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {innerImages.map((img, idx) => (
-                        <div
-                          key={idx}
-                          draggable
-                          onDragStart={(e) => handleInnerImageDragStart(e, p.id, idx)}
-                          onDragEnd={handleInnerImageDragEnd}
-                          onDragOver={handleInnerImageDragOver}
-                          onDrop={() => handleInnerImageDrop(p.id, idx)}
-                          style={{
-                            position: 'relative', display: 'inline-block',
-                            cursor: 'grab',
-                            border: (dragIndex === idx && dragProductId === p.id) ? '2px solid #00897b' : '2px solid transparent',
-                            borderRadius: 8, padding: 1,
-                            transition: 'border-color 0.2s',
-                          }}
-                        >
-                          <img
-                            src={img}
-                            alt={`内页图${idx + 1}`}
-                            style={{
-                              width: 80, height: 80, objectFit: 'cover',
-                              borderRadius: 6, border: '1px solid #ccc',
-                              pointerEvents: 'none',
-                            }}
-                          />
-                          <span style={{
-                            position: 'absolute', bottom: 2, left: 2,
-                            background: 'rgba(0,0,0,0.55)', color: '#fff',
-                            fontSize: 10, padding: '1px 5px', borderRadius: 4,
-                          }}>{idx + 1}</span>
-                          <button
-                            onClick={() => handleDeleteInnerImage(p.id, idx)}
-                            style={{
-                              position: 'absolute', top: -6, right: -6,
-                              width: 20, height: 20, borderRadius: '50%',
-                              background: '#e53935', color: '#fff', border: 'none',
-                              cursor: 'pointer', fontSize: 12, lineHeight: '18px',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center'
-                            }}
-                          >脳</button>
-                        </div>
-                      ))}
-                      <button
-                        onClick={() => handleInnerImageUpload(p.id)}
-                        style={{
-                          width: 80, height: 80, borderRadius: 6,
-                          border: '2px dashed #b2dfdb', background: '#e0f2f1',
-                          cursor: 'pointer', fontSize: 24, color: '#00897b',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}
-                      >+</button>
-                    </div>
+              <div key={p.id} className="product-item">
+                <div className="item-card">
+                  <div className="item-info">
+                    <strong>{p.name}</strong>
+                    <span className="item-meta">
+                      {p.productId && <span className="product-id">ID: {p.productId}</span>}
+                      {refCount > 0 && (
+                        <span style={{ marginLeft: 6, color: '#e65100', fontWeight: 600 }}>
+                          爆文参考 {refCount} 篇
+                          {hasAnalysis && <span style={{ color: '#7b1fa2' }}>（含AI分析）</span>}
+                          {refCount < 3 && <span style={{ color: '#f57c00', fontWeight: 400, fontSize: 11 }}>（建议≥3篇）</span>}
+                        </span>
+                      )}
+                      {refCount === 0 && (
+                        <span style={{ marginLeft: 6, color: '#bbb', fontSize: 11 }}>
+                          建议添加至少 3 篇爆文参考以提高多样性
+                        </span>
+                      )}
+                      {templateCount > 0 && (
+                        <span style={{ marginLeft: 6, color: '#6a1b9a', fontWeight: 600 }}>
+                          模板 {enabledTemplateCount}/{templateCount} 启用
+                        </span>
+                      )}
+                      {hasCover && (
+                        <span style={{ marginLeft: 6, color: '#1565c0', fontWeight: 600 }}>已定制封面</span>
+                      )}
+                      {(p.customSystemPrompt || p.customUserPrompt) && (
+                        <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>已定制提示词</span>
+                      )}
+                      {hasSeoConfig && (
+                        <span style={{ marginLeft: 6, color: '#0369a1', fontWeight: 600 }}>SEO已配置</span>
+                      )}
+                      {innerImages.length > 0 && (
+                        <span style={{ marginLeft: 6, color: '#00897b', fontWeight: 600 }}>内页图 {innerImages.length} 张</span>
+                      )}
+                    </span>
                   </div>
-                )}
+                  <div className="item-actions">
+                    <button className="btn-sm" onClick={() => handleInnerImageUpload(p.id)}
+                      style={{ background: innerImages.length > 0 ? '#e0f2f1' : undefined }}>
+                      {innerImages.length > 0 ? `内页图(${innerImages.length})` : '添加内页图'}
+                    </button>
+                    <button className="btn-sm" onClick={() => handleOpenRef(p)}
+                      style={{ background: refCount > 0 ? '#fff3e0' : undefined }}>
+                      {refCount > 0 ? `爆文参考(${refCount})` : '爆文参考'}
+                    </button>
+                    <button className="btn-sm" onClick={() => handleEditCover(p)}
+                      style={{ background: hasCover ? '#e3f2fd' : undefined }}>
+                      {hasCover ? '编辑封面' : '自定义封面'}
+                    </button>
+                    <button className="btn-sm" onClick={() => handleEditPrompt(p)}
+                      style={{ background: (p.customSystemPrompt || p.customUserPrompt) ? '#fff3e0' : undefined }}>
+                      {(p.customSystemPrompt || p.customUserPrompt) ? '编辑提示词' : '定制提示词'}
+                    </button>
+                    <button className="btn-sm" onClick={() => handleEditSeo(p)}
+                      style={{ background: hasSeoConfig ? '#e0f2fe' : undefined }}>
+                      {hasSeoConfig ? '编辑SEO' : 'SEO设置'}
+                    </button>
+                    <button className="btn-sm btn-danger" onClick={() => handleDelete(p.id)}>删除</button>
+                  </div>
+                  {innerImages.length > 0 && (
+                    <div style={{
+                      marginTop: 10, padding: '10px 12px', background: '#f0faf8',
+                      borderRadius: 8, border: '1px solid #b2dfdb',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#00897b' }}>
+                          内页图 ({innerImages.length} 张) - 可拖拽调整顺序，刷新后需重新上传
+                        </span>
+                        <button
+                          className="btn-sm btn-danger"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={() => handleClearInnerImages(p.id)}
+                        >清空全部</button>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {innerImages.map((img, idx) => (
+                          <div
+                            key={idx}
+                            draggable
+                            onDragStart={(e) => handleInnerImageDragStart(e, p.id, idx)}
+                            onDragEnd={handleInnerImageDragEnd}
+                            onDragOver={handleInnerImageDragOver}
+                            onDrop={() => handleInnerImageDrop(p.id, idx)}
+                            style={{
+                              position: 'relative', display: 'inline-block',
+                              cursor: 'grab',
+                              border: (dragIndex === idx && dragProductId === p.id) ? '2px solid #00897b' : '2px solid transparent',
+                              borderRadius: 8, padding: 1,
+                              transition: 'border-color 0.2s',
+                            }}
+                          >
+                            <img
+                              src={img}
+                              alt={`内页图${idx + 1}`}
+                              style={{
+                                width: 80, height: 80, objectFit: 'cover',
+                                borderRadius: 6, border: '1px solid #ccc',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                            <span style={{
+                              position: 'absolute', bottom: 2, left: 2,
+                              background: 'rgba(0,0,0,0.55)', color: '#fff',
+                              fontSize: 10, padding: '1px 5px', borderRadius: 4,
+                            }}>{idx + 1}</span>
+                            <button
+                              onClick={() => handleDeleteInnerImage(p.id, idx)}
+                              style={{
+                                position: 'absolute', top: -6, right: -6,
+                                width: 20, height: 20, borderRadius: '50%',
+                                background: '#e53935', color: '#fff', border: 'none',
+                                cursor: 'pointer', fontSize: 12, lineHeight: '18px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}
+                            >脳</button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => handleInnerImageUpload(p.id)}
+                          style={{
+                            width: 80, height: 80, borderRadius: 6,
+                            border: '2px dashed #b2dfdb', background: '#e0f2f1',
+                            cursor: 'pointer', fontSize: 24, color: '#00897b',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >+</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {refEditing === p.id && renderRefEditor(p)}
+                {promptEditing === p.id && renderPromptEditor(p)}
+                {seoEditing === p.id && renderSeoEditor(p)}
+                {coverEditing === p.id && renderCoverEditor(p)}
               </div>
             )
           })}

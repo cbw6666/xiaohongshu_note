@@ -1,6 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
-import { callAI, buildNotePrompt, parseNoteResponse, calcTitleLen, buildRetitlePrompt } from '../services/aiService.js'
+import {
+  callAI,
+  buildNotePrompt,
+  parseNoteResponse,
+  calcTitleLen,
+  buildRetitlePrompt,
+  buildTitleStyleGuidance,
+} from '../services/aiService.js'
 import { humanizeNote } from '../services/humanizerService.js'
 import { perturbContent, perturbTitle } from '../services/textPerturbation.js'
 import {
@@ -9,12 +16,80 @@ import {
   buildRetitleSeoPromptSection,
   enforceSeoResult,
   getProtectedKeywords,
+  auditSeoTextResult,
+  buildSeoRepairPrompt,
 } from '../services/seoService.js'
 import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
 import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
 import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
 import { renderCoverToBlob } from '../utils/coverRenderer.js'
+
+const MAX_TITLE_LEN = 20
+const TITLE_RETRY_LIMIT = 10
+const DUPLICATE_TITLE_RETRY_LIMIT = 3
+const MAX_GENERATION_ATTEMPTS = 5
+const TITLE_VARIATION_ANGLES = ['warning', 'contrast', 'result', 'question', 'pitfall-avoidance', 'recommendation']
+
+function truncateTitleByLen(title, maxLen = MAX_TITLE_LEN) {
+  if (!title) return ''
+  let truncated = ''
+  let len = 0
+  for (const ch of String(title || '')) {
+    const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
+    if (len + chLen > maxLen) break
+    truncated += ch
+    len += chLen
+  }
+  return truncated
+}
+
+function normalizeTitleKey(title = '') {
+  return String(title || '')
+    .replace(/[\s,，。.!！？?、:：;；"'“”‘’()（）【】\[\]<>《》\-—_~]/g, '')
+    .toLowerCase()
+}
+
+function buildDuplicateTitleInstruction(recentTitles = [], attempt = 0) {
+  const recent = recentTitles.slice(-5).filter(Boolean)
+  const angle = TITLE_VARIATION_ANGLES[(recent.length + Math.max(0, attempt - 1)) % TITLE_VARIATION_ANGLES.length]
+  const lines = [
+    'Title variation rules:',
+    '- Keep the title vivid and specific.',
+    '- Avoid plain keyword stitching.',
+    `- Prefer a ${angle} angle this time.`,
+    '- Make the sentence pattern clearly different from recent titles.',
+  ]
+
+  if (recent.length > 0) {
+    lines.push('- Avoid titles that are too close to these recent titles:')
+    recent.forEach((item) => lines.push(`  - ${item}`))
+  }
+
+  return lines.join('\n')
+}
+
+async function rewriteTitleWithGuidance({
+  settings,
+  currentTitle,
+  content,
+  productName,
+  seoPlan,
+  titleStyleGuidance = '',
+  extraInstruction = '',
+}) {
+  const retitleMessages = buildRetitlePrompt(currentTitle, content, productName, { titleStyleGuidance })
+  const sections = []
+
+  if (seoPlan) sections.push(buildRetitleSeoPromptSection(seoPlan))
+  if (extraInstruction) sections.push(extraInstruction)
+
+  if (sections.length > 0) {
+    retitleMessages[1].content = `${retitleMessages[1].content}\n\n${sections.join('\n\n')}`
+  }
+
+  return (await callAI(settings, retitleMessages)).trim()
+}
 
 export default function BatchGenerator({ settings, shops, onGenerated, innerImagesMap }) {
   const [generating, setGenerating] = useState(false)
@@ -122,6 +197,8 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
     let count = 0
     let successCount = 0
     let failCount = 0
+    const seenTitleKeys = new Set()
+    const recentTitles = []
 
     // 对封面模板列表做 Fisher-Yates 打散，避免顺序模式过于规律
     const shuffledCoverTemplates = [...selectedCoverTemplates]
@@ -161,6 +238,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
             const cleanName = (product.name || '').replace(/\n?\s*商品\s*ID\s*[:：]\s*[\s\S]*/i, '').replace(/\n?\s*预览\s*$/, '').trim()
             const itemId = product.productId || ((product.name || '').match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9]+)/i) || [])[1] || ''
             const seoPlan = buildSeoPlan(product, i)
+            const titleStyleGuidance = buildTitleStyleGuidance(product, i)
 
             let noteTitle = ''
             let noteContent = ''
@@ -170,107 +248,236 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
             let isError = false
             let innerImageCount = 0
 
-            try {
-              const messages = buildNotePrompt(product, { noteIndex: i })
-              if (seoPlan) {
-                messages[1].content = `${messages[1].content}\n\n${buildSeoPromptSection(seoPlan)}`
-              }
-              const raw = await callAI(settings, messages)
-              const parsed = parseNoteResponse(raw)
+            let generationSucceeded = false
+            let lastGenerateError = null
 
-              // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
-              let finalTitle = parsed.title
-              const MAX_TITLE_LEN = 20
-              const SAFE_LIMIT = 10
-              let retitleAttempt = 0
-              while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < SAFE_LIMIT) {
-                retitleAttempt++
-                try {
-                  const retitleMessages = buildRetitlePrompt(finalTitle, parsed.content, product.name)
-                  if (seoPlan) {
-                    retitleMessages[1].content = `${retitleMessages[1].content}\n\n${buildRetitleSeoPromptSection(seoPlan)}`
+            for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS && !generationSucceeded; attempt += 1) {
+              try {
+                if (attempt > 1) {
+                  setProgress({
+                    current: count,
+                    total: totalNotes,
+                    text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 第${attempt}轮重生成...`,
+                  })
+                }
+
+                const messages = buildNotePrompt(product, { noteIndex: i })
+                if (seoPlan) {
+                  messages[1].content = `${messages[1].content}\n\n${buildSeoPromptSection(seoPlan)}`
+                }
+                const raw = await callAI(settings, messages)
+                const parsed = parseNoteResponse(raw)
+
+                // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
+                let finalTitle = parsed.title
+                let retitleAttempt = 0
+                while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < TITLE_RETRY_LIMIT) {
+                  retitleAttempt++
+                  try {
+                    const newTitle = await rewriteTitleWithGuidance({
+                      settings,
+                      currentTitle: finalTitle,
+                      content: parsed.content,
+                      productName: product.name,
+                      seoPlan,
+                      titleStyleGuidance,
+                    })
+                    if (newTitle) finalTitle = newTitle
+                  } catch (e) {
+                    console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
                   }
-                  const newTitle = (await callAI(settings, retitleMessages)).trim()
-                  if (newTitle) finalTitle = newTitle
-                } catch (e) {
-                  console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
                 }
-              }
-              if (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN) {
-                let truncated = ''
-                let len = 0
-                for (const ch of finalTitle) {
-                  const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
-                  if (len + chLen > MAX_TITLE_LEN) break
-                  truncated += ch
-                  len += chLen
+                finalTitle = truncateTitleByLen(finalTitle, MAX_TITLE_LEN)
+
+                let attemptTitle = finalTitle || `${cleanName}种草`
+                let attemptContent = parsed.content || raw
+                let attemptTags = parsed.tags || ''
+                let attemptCoverTitle = product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8)
+                let attemptCoverSubtitle = product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
+
+                // 去AI味（跳过标题，只处理正文，保护爆款标题公式）
+                if (settings.apiKey && attemptContent) {
+                  setProgress({
+                    current: count,
+                    total: totalNotes,
+                    text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 去AI味...`,
+                  })
+                  try {
+                    const humanized = await humanizeNote(
+                      settings,
+                      { title: attemptTitle, content: attemptContent, tags: attemptTags },
+                      { skipTitle: true }
+                    )
+                    if (humanized?.content) attemptContent = humanized.content
+                  } catch (e) {
+                    console.warn('去AI味失败，使用原文:', e)
+                  }
                 }
-                finalTitle = truncated
-              }
 
-              noteTitle = finalTitle || `${cleanName}种草`
-              noteContent = parsed.content || raw
-              noteTags = parsed.tags || ''
-              noteCoverTitle = product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8)
-              noteCoverSubtitle = product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
-              successCount++
+                // 文本扰动（本地处理，不调用AI）— 进一步降低AI文本指纹
+                const protectedKeywords = seoPlan ? getProtectedKeywords(seoPlan) : []
+                attemptContent = perturbContent(attemptContent, { protectedKeywords })
+                if (!seoPlan) {
+                  attemptTitle = perturbTitle(attemptTitle, { protectedKeywords })
+                }
 
-              // 去AI味（跳过标题，只处理正文，保护爆款标题公式）
-              if (settings.apiKey && noteContent) {
-                setProgress({
-                  current: count,
-                  total: totalNotes,
-                  text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 去AI味...`,
-                })
-                try {
-                  const humanized = await humanizeNote(
-                    settings,
-                    { title: noteTitle, content: noteContent, tags: noteTags },
-                    { skipTitle: true }
+                if (seoPlan) {
+                  const seoFixed = enforceSeoResult(
+                    {
+                      title: attemptTitle,
+                      content: attemptContent,
+                      tags: attemptTags,
+                      coverTitle: attemptCoverTitle,
+                    },
+                    seoPlan,
                   )
-                  if (humanized?.content) noteContent = humanized.content
-                } catch (e) {
-                  console.warn('去AI味失败，使用原文:', e)
+                  attemptTitle = seoFixed.title || attemptTitle
+                  attemptContent = seoFixed.content || attemptContent
+                  attemptTags = seoFixed.tags || attemptTags
+                  attemptCoverTitle = seoFixed.coverTitle || attemptCoverTitle
+
+                  let seoAudit = auditSeoTextResult(
+                    {
+                      title: attemptTitle,
+                      content: attemptContent,
+                      tags: attemptTags,
+                    },
+                    seoPlan,
+                  )
+
+                  if (!seoAudit.pass) {
+                    setProgress({
+                      current: count,
+                      total: totalNotes,
+                      text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 SEO修正中...`,
+                    })
+
+                    const repairMessages = buildSeoRepairPrompt(
+                      {
+                        title: attemptTitle,
+                        content: attemptContent,
+                        tags: attemptTags,
+                      },
+                      seoPlan,
+                    )
+                    const repairRaw = await callAI(settings, repairMessages)
+                    const repaired = parseNoteResponse(repairRaw)
+
+                    attemptTitle = repaired.title || attemptTitle
+                    attemptContent = repaired.content || attemptContent
+                    attemptTags = repaired.tags || attemptTags
+
+                    const repairedSeo = enforceSeoResult(
+                      {
+                        title: attemptTitle,
+                        content: attemptContent,
+                        tags: attemptTags,
+                        coverTitle: attemptCoverTitle,
+                      },
+                      seoPlan,
+                    )
+
+                    attemptTitle = repairedSeo.title || attemptTitle
+                    attemptContent = repairedSeo.content || attemptContent
+                    attemptTags = repairedSeo.tags || attemptTags
+
+                    seoAudit = auditSeoTextResult(
+                      {
+                        title: attemptTitle,
+                        content: attemptContent,
+                        tags: attemptTags,
+                      },
+                      seoPlan,
+                    )
+
+                    if (!seoAudit.pass) {
+                      throw new Error(`SEO规则未通过: ${seoAudit.issues.join('；')}`)
+                    }
+                  }
                 }
-              }
 
-              // 文本扰动（本地处理，不调用AI）— 进一步降低AI文本指纹
-              const protectedKeywords = seoPlan ? getProtectedKeywords(seoPlan) : []
-              noteContent = perturbContent(noteContent, { protectedKeywords })
-              noteTitle = perturbTitle(noteTitle, { protectedKeywords })
+                let titleKey = normalizeTitleKey(attemptTitle)
+                if (titleKey && seenTitleKeys.has(titleKey)) {
+                  let dedupeAttempt = 0
 
-              if (seoPlan) {
-                const seoFixed = enforceSeoResult(
-                  {
-                    title: noteTitle,
-                    content: noteContent,
-                    tags: noteTags,
-                    coverTitle: noteCoverTitle,
-                  },
-                  seoPlan,
-                )
-                noteTitle = seoFixed.title || noteTitle
-                noteContent = seoFixed.content || noteContent
-                noteTags = seoFixed.tags || noteTags
-                noteCoverTitle = seoFixed.coverTitle || noteCoverTitle
-              }
+                  while (dedupeAttempt < DUPLICATE_TITLE_RETRY_LIMIT && seenTitleKeys.has(titleKey)) {
+                    dedupeAttempt++
 
-              // 扰动后再次校验标题字数
-              if (noteTitle && calcTitleLen(noteTitle) > MAX_TITLE_LEN) {
-                let truncated = ''
-                let len = 0
-                for (const ch of noteTitle) {
-                  const chLen = ch.codePointAt(0) > 0xFFFF ? 2 : 1
-                  if (len + chLen > MAX_TITLE_LEN) break
-                  truncated += ch
-                  len += chLen
+                    const variedTitle = await rewriteTitleWithGuidance({
+                      settings,
+                      currentTitle: attemptTitle,
+                      content: attemptContent,
+                      productName: product.name,
+                      seoPlan,
+                      titleStyleGuidance,
+                      extraInstruction: buildDuplicateTitleInstruction(recentTitles, dedupeAttempt),
+                    })
+
+                    if (!variedTitle) continue
+
+                    attemptTitle = truncateTitleByLen(variedTitle, MAX_TITLE_LEN)
+
+                    if (seoPlan) {
+                      const variedSeo = enforceSeoResult(
+                        {
+                          title: attemptTitle,
+                          content: attemptContent,
+                          tags: attemptTags,
+                          coverTitle: attemptCoverTitle,
+                        },
+                        seoPlan,
+                      )
+
+                      attemptTitle = variedSeo.title || attemptTitle
+                      attemptContent = variedSeo.content || attemptContent
+                      attemptTags = variedSeo.tags || attemptTags
+
+                      const variedAudit = auditSeoTextResult(
+                        {
+                          title: attemptTitle,
+                          content: attemptContent,
+                          tags: attemptTags,
+                        },
+                        seoPlan,
+                      )
+
+                      if (!variedAudit.pass) continue
+                    }
+
+                    titleKey = normalizeTitleKey(attemptTitle)
+                  }
+
+                  if (titleKey && seenTitleKeys.has(titleKey)) {
+                    throw new Error('标题重复，重写后仍未通过去重')
+                  }
                 }
-                noteTitle = truncated
+
+                // 扰动后再次校验标题字数
+                attemptTitle = truncateTitleByLen(attemptTitle, MAX_TITLE_LEN)
+                titleKey = normalizeTitleKey(attemptTitle)
+                if (titleKey) {
+                  seenTitleKeys.add(titleKey)
+                  recentTitles.push(attemptTitle)
+                  if (recentTitles.length > 8) recentTitles.shift()
+                }
+
+                noteTitle = attemptTitle
+                noteContent = attemptContent
+                noteTags = attemptTags
+                noteCoverTitle = attemptCoverTitle
+                noteCoverSubtitle = attemptCoverSubtitle
+                generationSucceeded = true
+                successCount++
+              } catch (err) {
+                lastGenerateError = err
+                console.warn(`第${i + 1}篇第${attempt}轮生成失败:`, err)
               }
-            } catch (err) {
-              console.error('生成失败:', err)
+            }
+
+            if (!generationSucceeded) {
+              console.error('生成失败:', lastGenerateError)
               noteTitle = `[生成失败] ${cleanName}`
-              noteContent = `错误: ${err.message}`
+              noteContent = `错误: ${lastGenerateError?.message || '未知错误'}`
               noteTags = ''
               noteCoverTitle = product.customCoverTitle || cleanName.slice(0, 8)
               noteCoverSubtitle = product.customCoverSubtitle || ''
@@ -278,82 +485,88 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
               failCount++
             }
 
-            // --- 流式写入 Excel：渲染封面 + 内页图去重 + appendRow ---
-            setProgress({
-              current: count,
-              total: totalNotes,
-              text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 写入Excel...`,
-            })
-
-            // 渲染封面图
-            let coverImage = null
-            try {
-              const blob = await renderCoverToBlob(coverTemplateId, { title: noteCoverTitle, subtitle: noteCoverSubtitle }, count)
-              coverImage = await new Promise(resolve => {
-                const reader = new FileReader()
-                reader.onloadend = () => resolve(reader.result)
-                reader.readAsDataURL(blob)
-              })
-            } catch (e) {
-              console.warn('渲染封面失败:', e)
-            }
-
-            // 对内页图进行去重处理
-            const rawInnerImages = innerImagesMap?.[product.id] || []
-            let dedupedInnerImages = []
-            if (rawInnerImages.length > 0) {
+            if (!isError) {
               setProgress({
                 current: count,
                 total: totalNotes,
-                text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 内页图去重...`,
+                text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 写入Excel...`,
               })
-              for (const img of rawInnerImages) {
-                dedupedInnerImages.push(await deduplicateImage(img))
-              }
-            }
-            innerImageCount = dedupedInnerImages.length
 
-            // 写入 Excel
-            try {
-              await writer.appendRow({
+              // 渲染封面图
+              let coverImage = null
+              try {
+                const blob = await renderCoverToBlob(coverTemplateId, { title: noteCoverTitle, subtitle: noteCoverSubtitle }, count)
+                coverImage = await new Promise(resolve => {
+                  const reader = new FileReader()
+                  reader.onloadend = () => resolve(reader.result)
+                  reader.readAsDataURL(blob)
+                })
+              } catch (e) {
+                console.warn('渲染封面失败:', e)
+              }
+
+              // 对内页图进行去重处理
+              const rawInnerImages = innerImagesMap?.[product.id] || []
+              let dedupedInnerImages = []
+              if (rawInnerImages.length > 0) {
+                setProgress({
+                  current: count,
+                  total: totalNotes,
+                  text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 内页图去重...`,
+                })
+                for (const img of rawInnerImages) {
+                  dedupedInnerImages.push(await deduplicateImage(img))
+                }
+              }
+              innerImageCount = dedupedInnerImages.length
+
+              // 写入 Excel
+              try {
+                await writer.appendRow({
+                  shopName: shop.name,
+                  accountName: account.name,
+                  productName: cleanName,
+                  productItemId: itemId,
+                  title: noteTitle,
+                  content: noteContent,
+                  tags: noteTags.split(/\s+/).filter(Boolean),
+                  coverImage,
+                  innerImages: dedupedInnerImages,
+                })
+              } catch (e) {
+                console.error('写入Excel失败:', e)
+              }
+
+              // 释放图片引用，帮助 GC
+              coverImage = null
+              dedupedInnerImages = null
+
+              // 轻量数据 push 到 results（不含图片和 raw）
+              results.push({
+                id: `${Date.now()}_${count}`,
+                shopId: shop.id,
                 shopName: shop.name,
+                accountId: account.id,
                 accountName: account.name,
-                productName: cleanName,
+                productId: product.id,
                 productItemId: itemId,
+                productName: cleanName,
+                coverTemplateId,
                 title: noteTitle,
                 content: noteContent,
-                tags: noteTags.split(/\s+/).filter(Boolean),
-                coverImage,
-                innerImages: dedupedInnerImages,
+                tags: noteTags,
+                coverTitle: noteCoverTitle,
+                coverSubtitle: noteCoverSubtitle,
+                innerImageCount,
+                createdAt: new Date().toISOString(),
               })
-            } catch (e) {
-              console.error('写入Excel失败:', e)
+            } else {
+              setProgress({
+                current: count,
+                total: totalNotes,
+                text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 最终未通过，已跳过导出`,
+              })
             }
-
-            // 释放图片引用，帮助 GC
-            coverImage = null
-            dedupedInnerImages = null
-
-            // 轻量数据 push 到 results（不含图片和 raw）
-            results.push({
-              id: `${Date.now()}_${count}`,
-              shopId: shop.id,
-              shopName: shop.name,
-              accountId: account.id,
-              accountName: account.name,
-              productId: product.id,
-              productItemId: itemId,
-              productName: cleanName,
-              coverTemplateId,
-              title: noteTitle,
-              content: noteContent,
-              tags: noteTags,
-              coverTitle: noteCoverTitle,
-              coverSubtitle: noteCoverSubtitle,
-              innerImageCount,
-              error: isError || undefined,
-              createdAt: new Date().toISOString(),
-            })
 
             if (count < totalNotes) {
               await new Promise(r => setTimeout(r, 800))

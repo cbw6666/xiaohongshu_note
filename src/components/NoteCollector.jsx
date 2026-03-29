@@ -445,10 +445,10 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
         try {
           const humanized = await humanizeNote(
             settings,
-            { title: rewrittenTitle, content: rewrittenContent, tags: note.tags.map(t => '#' + t).join(' ') }
+            { title: rewrittenTitle, content: rewrittenContent, tags: note.tags.map(t => '#' + t).join(' ') },
+            { skipTitle: true }
           )
           if (humanized?.content) rewrittenContent = humanized.content
-          if (humanized?.title) rewrittenTitle = humanized.title
         } catch { /* 去 AI 味失败不影响主流程 */ }
       }
 
@@ -746,10 +746,10 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
           try {
             const humanized = await humanizeNote(
               settings,
-              { title: finalTitle, content: finalContent, tags: finalTags.map(t => '#' + t).join(' ') }
+              { title: finalTitle, content: finalContent, tags: finalTags.map(t => '#' + t).join(' ') },
+              { skipTitle: true }
             )
             if (humanized?.content) finalContent = humanized.content
-            if (humanized?.title) finalTitle = humanized.title
           } catch { /* 去 AI 味失败不影响 */ }
         }
 

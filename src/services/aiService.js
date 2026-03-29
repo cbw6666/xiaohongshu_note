@@ -476,6 +476,78 @@ export function buildNotePrompt(product, options = {}) {
   ]
 }
 
+function compactPromptLine(text = '', maxLen = 160) {
+  return String(text || '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen)
+}
+
+function extractReferenceTitle(ref = {}) {
+  if (ref?.title) return compactPromptLine(ref.title, 32)
+
+  const text = String(ref?.text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (text.length === 0) return ''
+
+  const titleLine =
+    text.find((line) => /^标题[:：]/.test(line)) ||
+    text[0]
+
+  return compactPromptLine(titleLine.replace(/^标题[:：]\s*/, ''), 32)
+}
+
+function extractTemplateTitleCue(template = {}) {
+  const analysis = compactPromptLine(template?.analysis || '', 240)
+  if (!analysis) return ''
+
+  const matched =
+    analysis.match(/标题公式[^：:]*[:：]\s*([^\n。；;]+)/) ||
+    analysis.match(/标题技巧[^：:]*[:：]\s*([^\n。；;]+)/)
+
+  return compactPromptLine(matched?.[1] || analysis, 120)
+}
+
+export function buildTitleStyleGuidance(product = {}, noteIndex = 0) {
+  const references = Array.isArray(product?.references) ? product.references : []
+  const enabledTemplates = (Array.isArray(product?.styleTemplates) ? product.styleTemplates : [])
+    .filter((item) => item && item.enabled !== false)
+
+  const lines = []
+
+  if (enabledTemplates.length > 0) {
+    const template = enabledTemplates[Math.abs(Number(noteIndex) || 0) % enabledTemplates.length]
+    const titleCue = extractTemplateTitleCue(template)
+    lines.push(`优先保持风格模板「${template.name || '未命名模板'}」的标题气质。`)
+    if (titleCue) {
+      lines.push(`模板里的标题线索：${titleCue}`)
+    }
+  }
+
+  if (references.length > 0) {
+    const primaryIndex = Math.abs(Number(noteIndex) || 0) % references.length
+    const primaryTitle = extractReferenceTitle(references[primaryIndex])
+    const secondaryTitle = references.length >= 3
+      ? extractReferenceTitle(references[(primaryIndex + Math.floor(references.length / 2)) % references.length])
+      : ''
+
+    const exampleTitles = [...new Set([primaryTitle, secondaryTitle].filter(Boolean))]
+    if (exampleTitles.length > 0) {
+      lines.push(`参考这些爆文标题的句式、钩子和情绪强度：${exampleTitles.join(' / ')}`)
+      lines.push('可以换词，但要保留同类型的悬念感、反差感、提问感或情绪力度。')
+    }
+  }
+
+  if (lines.length === 0) return ''
+
+  lines.push('不要被SEO规则拉平成普通关键词拼接标题。')
+  return lines.join('\n')
+}
+
 export function parseNoteResponse(text) {
   const extract = (label) => {
     const reg = new RegExp(`---${label}---\\s*([\\s\\S]*?)(?=---|$)`)
@@ -510,7 +582,8 @@ export function calcTitleLen(str) {
 }
 
 // 构建"只重新生成标题"的 prompt（爆款标题版）
-export function buildRetitlePrompt(originalTitle, content, productName) {
+export function buildRetitlePrompt(originalTitle, content, productName, options = {}) {
+  const titleStyleGuidance = String(options?.titleStyleGuidance || '').trim()
   return [
     {
       role: 'system',
@@ -539,7 +612,10 @@ export function buildRetitlePrompt(originalTitle, content, productName) {
 商品名称：${productName}
 正文摘要：${content.slice(0, 200)}
 
-请重新写一个20字以内的爆款标题，保留原标题的爆款因子，直接输出标题内容：`,
+${titleStyleGuidance ? `参考标题风格（高优先级，在满足字数和合规的前提下尽量保留）：
+${titleStyleGuidance}
+
+` : ''}请重新写一个20字以内的爆款标题，保留原标题的爆款因子，直接输出标题内容：`,
     },
   ]
 }
