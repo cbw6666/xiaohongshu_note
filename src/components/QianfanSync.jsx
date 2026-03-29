@@ -10,6 +10,38 @@ console.log('正在提取页面数据...');
 
 var shopName='',shopId='',products=[];
 
+function normalizeId(raw){
+  return String(raw||'')
+    .replace(/^(?:商品ID|商品Id|商品id|ID|itemId|spuId|productId|goodsId)\s*[:：=]\s*/i,'')
+    .replace(/[，。,;；)\]】>\s].*$/,'')
+    .trim();
+}
+
+function extractIdFromText(text){
+  var t=String(text||'').trim();
+  if(!t)return '';
+
+  // 常见“字段名: ID”格式
+  var m=t.match(/(?:商品ID|商品Id|商品id|ID|itemId|spuId|productId|goodsId)\s*[:：=]\s*([A-Za-z0-9_-]{6,})/i);
+  if(m)return normalizeId(m[1]);
+
+  // URL 参数格式
+  m=t.match(/[?&](?:itemId|spuId|productId|goodsId)=([A-Za-z0-9_-]{6,})/i);
+  if(m)return normalizeId(m[1]);
+
+  // 路径参数格式
+  m=t.match(/(?:item|spu|product|goods|detail)[\/=]([A-Za-z0-9_-]{6,})/i);
+  if(m)return normalizeId(m[1]);
+
+  // 纯数字ID
+  if(/^\d{6,}$/.test(t))return t;
+
+  // 32位及以上十六进制ID
+  if(/^[a-f0-9]{20,}$/i.test(t))return t;
+
+  return '';
+}
+
 // 1. 获取店铺名
 try{
   var shopEls=[
@@ -35,9 +67,12 @@ try{
       cells.forEach(function(c){texts.push(c.innerText.trim())});
       var name='',id='';
       texts.forEach(function(t){
-        if(/^[a-f0-9]{20,}$/.test(t)&&!id)id=t;
-        else if(/^\\d{6,}$/.test(t)&&!id)id=t;
-        else if(t.length>name.length&&t.length>2&&t.length<200)name=t;
+        if(!id){
+          var maybeId=extractIdFromText(t);
+          if(maybeId)id=maybeId;
+        }
+        // 名称提取与ID提取并行进行，避免互斥导致漏掉商品名
+        if(t.length>name.length&&t.length>2&&t.length<200&&!/^\\d+(\\.\\d+)?$/.test(t)&&!/^[¥￥$]/.test(t))name=t;
       });
       if(name)products.push({productId:id,name:name,description:''});
     });
@@ -62,9 +97,11 @@ if(products.length===0){
       var lines=text.split('\\n').map(function(s){return s.trim()}).filter(function(s){return s.length>0});
       var name='',id='';
       lines.forEach(function(line){
-        if(/^[a-f0-9]{20,}$/.test(line)&&!id)id=line;
-        else if(/^\\d{6,}$/.test(line)&&!id)id=line;
-        else if(line.length>name.length&&line.length>2&&line.length<200&&!/^[¥￥$]/.test(line)&&!/^\\d+(\\.\\d+)?$/.test(line))name=line;
+        if(!id){
+          var maybeId=extractIdFromText(line);
+          if(maybeId)id=maybeId;
+        }
+        if(line.length>name.length&&line.length>2&&line.length<200&&!/^[¥￥$]/.test(line)&&!/^\\d+(\\.\\d+)?$/.test(line))name=line;
       });
       if(name)products.push({productId:id,name:name,description:''});
     });
@@ -78,8 +115,8 @@ if(products.length===0){
       var name=a.innerText.trim();
       if(!name||name.length<3||name.length>200)return;
       if(/首页|管理|设置|订单|数据|营销|客服|物流/g.test(name))return;
-      var match=a.href.match(/(?:product|goods|spu|item|detail)[/=]([a-f0-9]+)/i);
-      var id=match?match[1]:'';
+      var id=extractIdFromText(a.href);
+      if(!id)id=extractIdFromText(name);
       products.push({productId:id,name:name,description:''});
     });
   }catch(e){}
@@ -127,8 +164,13 @@ if(products.length===0){
         walkFiber(root[key],0);
         if(collected.length>0){
           collected.forEach(function(item){
+            var mixedText = [
+              item.spuId, item.itemId, item.goodsId, item.productId, item.id,
+              item.spuCode, item.itemCode, item.productCode,
+              item.url, item.link, item.detailUrl
+            ].filter(Boolean).join(' ');
             products.push({
-              productId:String(item.spuId||item.itemId||item.goodsId||item.productId||item.id||''),
+              productId:extractIdFromText(mixedText),
               name:item.title||item.name||item.goodsName||item.productName||item.itemName||item.spuName||'',
               description:item.desc||item.subTitle||item.description||item.brief||''
             });
@@ -253,14 +295,40 @@ export default function QianfanSync({ onImport }) {
     }
   }, [handleMessage])
 
-  const handleOpenQianfan = () => {
+  const copySyncScriptToClipboard = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(SYNC_SCRIPT)
+      return true
+    } catch {
+      // fallback
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = SYNC_SCRIPT
+        ta.style.position = 'fixed'
+        ta.style.left = '-9999px'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+        return true
+      } catch {
+        return false
+      }
+    }
+  }, [])
+
+  const handleOpenQianfan = async () => {
     setSyncedShop(null)
     setScriptCopied(false)
 
+    // 用户点击打开时自动复制脚本，减少手动步骤
+    const copied = await copySyncScriptToClipboard()
+    setScriptCopied(copied)
+
+    // 用浏览器新标签页打开（而非弹窗窗口），减少被拦截概率
     const win = window.open(
       'https://ark.xiaohongshu.com',
-      'qianfan_window',
-      'width=1200,height=800,left=100,top=100'
+      '_blank'
     )
 
     if (!win) {
@@ -274,25 +342,8 @@ export default function QianfanSync({ onImport }) {
   }
 
   const handleCopyScript = async () => {
-    try {
-      await navigator.clipboard.writeText(SYNC_SCRIPT)
-      setScriptCopied(true)
-    } catch {
-      // fallback
-      try {
-        const ta = document.createElement('textarea')
-        ta.value = SYNC_SCRIPT
-        ta.style.position = 'fixed'
-        ta.style.left = '-9999px'
-        document.body.appendChild(ta)
-        ta.select()
-        document.execCommand('copy')
-        document.body.removeChild(ta)
-        setScriptCopied(true)
-      } catch {
-        setScriptCopied(false)
-      }
-    }
+    const copied = await copySyncScriptToClipboard()
+    setScriptCopied(copied)
   }
 
   const handleConfirmImport = () => {

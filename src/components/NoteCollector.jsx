@@ -1111,7 +1111,18 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
               </div>
               <div className="form-group" style={{ margin: 0 }}>
                 <label style={{ fontSize: 12 }}>商品ID</label>
-                <input value={globalSettings.productItemId} readOnly style={{ fontSize: 13, background: '#eee', cursor: 'default' }} />
+                <input
+                  value={globalSettings.productItemId}
+                  readOnly
+                  style={{
+                    fontSize: 13,
+                    background: '#eef2f7',
+                    color: '#0f172a',
+                    fontWeight: 600,
+                    border: '1px solid #cbd5e1',
+                    cursor: 'default',
+                  }}
+                />
               </div>
             </>
           )}

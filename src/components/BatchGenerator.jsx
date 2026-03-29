@@ -24,6 +24,7 @@ import { createStreamWriter } from '../utils/streamExportUtils.js'
 import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
 import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
 import { renderCoverToBlob } from '../utils/coverRenderer.js'
+import { normalizeCoverVariants, pickCoverVariant } from '../services/coverVariantService.js'
 
 const MAX_TITLE_LEN = 20
 const TITLE_RETRY_LIMIT = 10
@@ -206,6 +207,10 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
       const j = Math.floor(Math.random() * (k + 1));
       [shuffledCoverTemplates[k], shuffledCoverTemplates[j]] = [shuffledCoverTemplates[j], shuffledCoverTemplates[k]]
     }
+    const fallbackCoverTemplates = shuffledCoverTemplates.length > 0
+      ? shuffledCoverTemplates
+      : COVER_TEMPLATES.map(t => t.id)
+    const safeFallbackCoverTemplates = fallbackCoverTemplates.length > 0 ? fallbackCoverTemplates : ['']
 
     for (const shopId of selectedShops) {
       if (abortRef.current) break
@@ -218,6 +223,8 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
       for (const product of selectedProducts) {
         if (abortRef.current) break
         const noteCount = productConfig[product.id]?.count || 3
+        const productCoverVariants = normalizeCoverVariants(product)
+        let productCoverSeq = 0
 
         for (const account of accounts) {
           if (abortRef.current) break
@@ -225,7 +232,10 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
           for (let i = 0; i < noteCount; i++) {
             if (abortRef.current) break
 
-            const coverTemplateId = product.customCoverTemplateId || shuffledCoverTemplates[count % shuffledCoverTemplates.length]
+            const currentCoverSeq = productCoverSeq
+            const activeCoverVariant = pickCoverVariant(productCoverVariants, currentCoverSeq)
+            const coverTemplateId = activeCoverVariant?.coverTemplateId || product.customCoverTemplateId || safeFallbackCoverTemplates[count % safeFallbackCoverTemplates.length]
+            productCoverSeq++
 
             count++
             setProgress({
@@ -292,8 +302,8 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 let attemptTitle = finalTitle || `${cleanName}种草`
                 let attemptContent = parsed.content || raw
                 let attemptTags = parsed.tags || ''
-                let attemptCoverTitle = product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8)
-                let attemptCoverSubtitle = product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
+                let attemptCoverTitle = activeCoverVariant?.coverTitle || product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8)
+                let attemptCoverSubtitle = activeCoverVariant?.coverSubtitle || product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
 
                 // 去AI味（跳过标题，只处理正文，保护爆款标题公式）
                 if (settings.apiKey && attemptContent) {
@@ -479,8 +489,8 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
               noteTitle = `[生成失败] ${cleanName}`
               noteContent = `错误: ${lastGenerateError?.message || '未知错误'}`
               noteTags = ''
-              noteCoverTitle = product.customCoverTitle || cleanName.slice(0, 8)
-              noteCoverSubtitle = product.customCoverSubtitle || ''
+              noteCoverTitle = activeCoverVariant?.coverTitle || product.customCoverTitle || cleanName.slice(0, 8)
+              noteCoverSubtitle = activeCoverVariant?.coverSubtitle || product.customCoverSubtitle || ''
               isError = true
               failCount++
             }

@@ -3,6 +3,7 @@ import { callAI, buildAnalysisPrompt } from '../services/aiService.js'
 import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import CoverCanvas from './CoverCanvas.jsx'
 import { keywordPoolToText, keywordTextToPool, normalizeSeoConfig } from '../services/seoService.js'
+import { normalizeCoverVariants, syncLegacyCoverFields, createBlankCoverVariant } from '../services/coverVariantService.js'
 
 const splitWords = (input = '') =>
   String(input || '')
@@ -763,8 +764,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   const [showTemplateList, setShowTemplateList] = useState(false)
   // 灏侀潰鑷畾涔?
   const [coverEditing, setCoverEditing] = useState(null)
-  const [coverForm, setCoverForm] = useState({ coverTitle: '', coverSubtitle: '', coverTemplateId: '' })
-  const [coverPreviewTplId, setCoverPreviewTplId] = useState(COVER_TEMPLATES[0]?.id || '')
+  const [coverForm, setCoverForm] = useState([])
   const [seoEditing, setSeoEditing] = useState(null)
   const [seoForm, setSeoForm] = useState(buildSeoForm({ seoConfig: {} }))
   const [seoKeywordSyncOpen, setSeoKeywordSyncOpen] = useState(false)
@@ -939,26 +939,50 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
   // 灏侀潰鑷畾涔?
   const handleEditCover = (p) => {
+    const variants = normalizeCoverVariants(p)
     setCoverEditing(p.id)
-    setCoverForm({
-      coverTitle: p.customCoverTitle || '',
-      coverSubtitle: p.customCoverSubtitle || '',
-      coverTemplateId: p.customCoverTemplateId || '',
+    setCoverForm(variants.length > 0 ? variants : [createBlankCoverVariant('new')])
+  }
+
+  const handleAddCoverVariant = () => {
+    setCoverForm(prev => {
+      if (prev.length >= 10) return prev
+      return [...prev, createBlankCoverVariant('new')]
     })
-    setCoverPreviewTplId(p.customCoverTemplateId || COVER_TEMPLATES[0]?.id || '')
+  }
+
+  const handleUpdateCoverVariant = (variantId, patch) => {
+    setCoverForm(prev => prev.map(v => v.id === variantId ? { ...v, ...patch } : v))
+  }
+
+  const handleDeleteCoverVariant = (variantId) => {
+    setCoverForm(prev => prev.filter(v => v.id !== variantId))
+  }
+
+  const handleToggleCoverVariant = (variantId) => {
+    setCoverForm(prev => prev.map(v => v.id === variantId ? { ...v, enabled: v.enabled === false } : v))
   }
 
   const handleSaveCover = () => {
+    if (!coverEditing) return
+
     onUpdateShop({
       ...shop,
-      products: products.map(p => p.id === coverEditing ? {
-        ...p,
-        customCoverTitle: coverForm.coverTitle.trim() || undefined,
-        customCoverSubtitle: coverForm.coverSubtitle.trim() || undefined,
-        customCoverTemplateId: coverForm.coverTemplateId || undefined,
-      } : p),
+      products: products.map(p => {
+        if (p.id !== coverEditing) return p
+        return syncLegacyCoverFields(p, coverForm)
+      }),
     })
+  }
+
+  const closeCoverEditor = () => {
     setCoverEditing(null)
+    setCoverForm([])
+  }
+
+  const handleSaveCoverAndClose = () => {
+    handleSaveCover()
+    closeCoverEditor()
   }
 
   const handleClearCover = () => {
@@ -966,12 +990,13 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       ...shop,
       products: products.map(p => p.id === coverEditing ? {
         ...p,
+        customCoverVariants: undefined,
         customCoverTitle: undefined,
         customCoverSubtitle: undefined,
         customCoverTemplateId: undefined,
       } : p),
     })
-    setCoverEditing(null)
+    closeCoverEditor()
   }
 
   const handleEditSeo = (product) => {
@@ -1840,99 +1865,191 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       background: '#f0f7ff', border: '1px solid #90caf9', borderRadius: 12,
       padding: 20, marginTop: 12,
     }}>
-      <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-        自定义封面 - {product?.name}
-      </h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>
+          自定义封面 - {product?.name}
+        </h3>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn-primary"
+            style={{ padding: '6px 12px', fontSize: 12 }}
+            onClick={handleSaveCoverAndClose}
+            disabled={coverForm.length === 0}
+          >
+            保存并关闭
+          </button>
+          <button
+            className="btn-secondary"
+            style={{ padding: '6px 12px', fontSize: 12 }}
+            onClick={closeCoverEditor}
+          >
+            收起
+          </button>
+        </div>
+      </div>
       <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-        填写后批量生成会优先使用你的封面内容；留空则继续使用 AI 自动生成。
+        每个商品支持最多 10 套封面方案。批量生成时按顺序轮换；留空的字段会自动回退到 AI 生成。
       </p>
 
-      <div style={{ marginBottom: 12 }}>
-        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
-          封面主标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 8-18 字，可回车换行）</span>
-        </label>
-        <textarea
-          value={coverForm.coverTitle}
-          onChange={e => setCoverForm(prev => ({ ...prev, coverTitle: e.target.value }))}
-          placeholder={'例如：逼自己做自媒体的第一天\n建议先收藏'}
-          maxLength={50}
-          rows={3}
-          style={{
-            width: '100%', padding: '8px 12px', borderRadius: 8,
-            border: '1px solid #90caf9', fontSize: 13, outline: 'none',
-            resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5,
-          }}
-        />
-        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-          {coverForm.coverTitle.replace(/\n/g, '').length}字（不含换行）
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: '#0369a1' }}>
+          当前 {coverForm.length} 套，启用 {coverForm.filter(v => v.enabled !== false).length} 套
         </div>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
-          封面副标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 15 字以内）</span>
-        </label>
-        <input
-          type="text"
-          value={coverForm.coverSubtitle}
-          onChange={e => setCoverForm(prev => ({ ...prev, coverSubtitle: e.target.value }))}
-          placeholder="例如：万能模板 + 高分框架"
-          maxLength={25}
-          style={{
-            width: '100%', padding: '8px 12px', borderRadius: 8,
-            border: '1px solid #90caf9', fontSize: 13, outline: 'none',
-          }}
-        />
-        <div style={{ fontSize: 11, color: coverForm.coverSubtitle.length > 15 ? '#e53935' : '#888', marginTop: 2 }}>
-          {coverForm.coverSubtitle.length}/25字
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <label style={{ fontWeight: 600, fontSize: 13, display: 'block', marginBottom: 4 }}>
-          指定封面模板 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（可选）</span>
-        </label>
-        <select
-          value={coverForm.coverTemplateId}
-          onChange={e => {
-            setCoverForm(prev => ({ ...prev, coverTemplateId: e.target.value }))
-            if (e.target.value) setCoverPreviewTplId(e.target.value)
-          }}
-          style={{
-            width: '100%', padding: '8px 12px', borderRadius: 8,
-            border: '1px solid #90caf9', fontSize: 13,
-          }}
+        <button
+          className="btn-secondary"
+          onClick={handleAddCoverVariant}
+          disabled={coverForm.length >= 10}
+          style={{ padding: '6px 12px', fontSize: 12 }}
         >
-          <option value="">不指定（按批量生成设置）</option>
-          {COVER_TEMPLATES.map(t => (
-            <option key={t.id} value={t.id}>{t.name} - {t.desc}</option>
-          ))}
-        </select>
+          新增方案
+        </button>
       </div>
 
-      {coverForm.coverTitle && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>实时预览</div>
-          <CoverCanvas
-            templateId={coverForm.coverTemplateId || coverPreviewTplId}
-            data={{ title: coverForm.coverTitle, subtitle: coverForm.coverSubtitle }}
-            colorIdx={0}
-            width={200}
-          />
+      {coverForm.length === 0 && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 8, border: '1px dashed #93c5fd',
+          background: '#f8fbff', fontSize: 12, color: '#1d4ed8', marginBottom: 12,
+        }}>
+          当前没有封面方案，可点击“新增方案”创建。
         </div>
       )}
 
+      {coverForm.map((variant, idx) => {
+        const previewTemplateId = variant.coverTemplateId || COVER_TEMPLATES[0]?.id || ''
+        const hasVariantContent = Boolean(
+          String(variant.coverTitle || '').trim() ||
+          String(variant.coverSubtitle || '').trim() ||
+          String(variant.coverTemplateId || '').trim(),
+        )
+        return (
+          <div
+            key={variant.id}
+            style={{
+              border: '1px solid #bfdbfe',
+              borderRadius: 10,
+              padding: 12,
+              background: '#f8fbff',
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <strong style={{ fontSize: 13, color: '#1e3a8a' }}>方案 {idx + 1}</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ fontSize: 12, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={variant.enabled !== false}
+                    onChange={() => handleToggleCoverVariant(variant.id)}
+                  />
+                  启用
+                </label>
+                <button
+                  className="btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: 11 }}
+                  onClick={handleAddCoverVariant}
+                  disabled={coverForm.length >= 10}
+                >
+                  新增
+                </button>
+                <button
+                  className="btn-danger"
+                  style={{ padding: '4px 10px', fontSize: 11 }}
+                  onClick={() => handleDeleteCoverVariant(variant.id)}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontWeight: 600, fontSize: 12, display: 'block', marginBottom: 4 }}>
+                封面主标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 8-18 字，可回车换行）</span>
+              </label>
+              <textarea
+                value={variant.coverTitle}
+                onChange={e => handleUpdateCoverVariant(variant.id, { coverTitle: e.target.value })}
+                placeholder={'例如：逼自己做自媒体的第一天\n建议先收藏'}
+                maxLength={50}
+                rows={3}
+                style={{
+                  width: '100%', padding: '8px 12px', borderRadius: 8,
+                  border: '1px solid #90caf9', fontSize: 13, outline: 'none',
+                  resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5,
+                }}
+              />
+              <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                {String(variant.coverTitle || '').replace(/\n/g, '').length}字（不含换行）
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontWeight: 600, fontSize: 12, display: 'block', marginBottom: 4 }}>
+                封面副标题 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（建议 15 字以内）</span>
+              </label>
+              <input
+                type="text"
+                value={variant.coverSubtitle}
+                onChange={e => handleUpdateCoverVariant(variant.id, { coverSubtitle: e.target.value })}
+                placeholder="例如：万能模板 + 高分框架"
+                maxLength={25}
+                style={{
+                  width: '100%', padding: '8px 12px', borderRadius: 8,
+                  border: '1px solid #90caf9', fontSize: 13, outline: 'none',
+                }}
+              />
+              <div style={{ fontSize: 11, color: String(variant.coverSubtitle || '').length > 15 ? '#e53935' : '#888', marginTop: 2 }}>
+                {String(variant.coverSubtitle || '').length}/25字
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontWeight: 600, fontSize: 12, display: 'block', marginBottom: 4 }}>
+                指定封面模板 <span style={{ fontWeight: 400, color: '#888', fontSize: 11 }}>（可选）</span>
+              </label>
+              <select
+                value={variant.coverTemplateId}
+                onChange={e => handleUpdateCoverVariant(variant.id, { coverTemplateId: e.target.value })}
+                style={{
+                  width: '100%', padding: '8px 12px', borderRadius: 8,
+                  border: '1px solid #90caf9', fontSize: 13,
+                }}
+              >
+                <option value="">不指定（按批量生成设置）</option>
+                {COVER_TEMPLATES.map(t => (
+                  <option key={t.id} value={t.id}>{t.name} - {t.desc}</option>
+                ))}
+              </select>
+            </div>
+
+            {hasVariantContent && (
+              <div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>实时预览</div>
+                <CoverCanvas
+                  templateId={previewTemplateId}
+                  data={{ title: variant.coverTitle, subtitle: variant.coverSubtitle }}
+                  colorIdx={idx}
+                  width={200}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
+
       <div className="btn-row" style={{ marginTop: 16 }}>
-        <button className="btn-primary" onClick={handleSaveCover}
-          disabled={!coverForm.coverTitle.trim() && !coverForm.coverSubtitle.trim() && !coverForm.coverTemplateId}>
+        <button
+          className="btn-primary"
+          onClick={handleSaveCover}
+          disabled={coverForm.length === 0}
+        >
           保存封面设置
         </button>
-        {(product?.customCoverTitle || product?.customCoverSubtitle || product?.customCoverTemplateId) && (
+        {normalizeCoverVariants(product).length > 0 && (
           <button className="btn-danger" onClick={handleClearCover}>
             清除自定义（恢复 AI 生成）
           </button>
         )}
-        <button className="btn-secondary" onClick={() => setCoverEditing(null)}>取消</button>
+        <button className="btn-secondary" onClick={closeCoverEditor}>取消</button>
       </div>
     </div>
   )
@@ -1958,7 +2075,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             const hasAnalysis = (p.references || []).some(r => r.analysis)
             const templateCount = (p.styleTemplates || []).length
             const enabledTemplateCount = (p.styleTemplates || []).filter(t => t.enabled !== false).length
-            const hasCover = p.customCoverTitle || p.customCoverSubtitle
+            const coverVariants = normalizeCoverVariants(p)
+            const hasCover = coverVariants.length > 0
+            const coverVariantCount = coverVariants.length
             const normalizedSeo = normalizeSeoConfig(p.seoConfig || {}, p)
             const hasSeoConfig = Boolean(
               normalizedSeo.seedKeyword ||
@@ -1997,7 +2116,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                         </span>
                       )}
                       {hasCover && (
-                        <span style={{ marginLeft: 6, color: '#1565c0', fontWeight: 600 }}>已定制封面</span>
+                        <span style={{ marginLeft: 6, color: '#1565c0', fontWeight: 600 }}>已定制封面（{coverVariantCount}套）</span>
                       )}
                       {(p.customSystemPrompt || p.customUserPrompt) && (
                         <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>已定制提示词</span>
@@ -2021,7 +2140,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                     </button>
                     <button className="btn-sm" onClick={() => handleEditCover(p)}
                       style={{ background: hasCover ? '#e3f2fd' : undefined }}>
-                      {hasCover ? '编辑封面' : '自定义封面'}
+                      {hasCover ? `编辑封面(${coverVariantCount})` : '自定义封面'}
                     </button>
                     <button className="btn-sm" onClick={() => handleEditPrompt(p)}
                       style={{ background: (p.customSystemPrompt || p.customUserPrompt) ? '#fff3e0' : undefined }}>
@@ -2116,6 +2235,42 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       )}
 
       {products.length === 0 && <p className="empty-state">该店铺还没有商品，请先在店铺管理中从千帆同步。</p>}
+
+      {coverEditing && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: 16,
+            zIndex: 1200,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            padding: 8,
+            borderRadius: 12,
+            background: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid rgba(148, 163, 184, 0.35)',
+            boxShadow: '0 10px 24px rgba(2, 6, 23, 0.35)',
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          <button
+            className="btn-primary"
+            style={{ padding: '6px 12px', fontSize: 12 }}
+            onClick={handleSaveCoverAndClose}
+            disabled={coverForm.length === 0}
+          >
+            保存并关闭
+          </button>
+          <button
+            className="btn-secondary"
+            style={{ padding: '6px 12px', fontSize: 12 }}
+            onClick={closeCoverEditor}
+          >
+            收起
+          </button>
+        </div>
+      )}
     </div>
   )
 }

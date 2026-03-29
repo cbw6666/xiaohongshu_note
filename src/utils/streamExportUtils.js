@@ -283,16 +283,8 @@ export async function createStreamWriter() {
       return rowIndex
     },
 
-    /** 完成写入（写入汇总信息） */
-    async finalize(summary) {
-      // 空一行写汇总
-      sheet.addRow([])
-      const summaryRow = sheet.addRow([
-        '', '', '', '', '',
-        `采集完成 | 总计: ${summary.total} | 成功: ${summary.success} | 失败: ${summary.fail}`,
-      ])
-      summaryRow.getCell(6).font = { bold: true, size: 11, color: { argb: 'FF1565C0' } }
-
+    /** 完成写入（不再追加汇总行，便于后续批量合并） */
+    async finalize() {
       await flush()
     },
   }
