@@ -23,6 +23,7 @@ import { deduplicateImage } from '../utils/imageDeduplicator.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
 import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
 import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
+import { splitExcelFile } from '../utils/excelSplitUtils.js'
 import { renderCoverToBlob } from '../utils/coverRenderer.js'
 import { normalizeCoverVariants, pickCoverVariant } from '../services/coverVariantService.js'
 
@@ -99,6 +100,9 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
   const [productConfig, setProductConfig] = useState({})
   const [selectedCoverTemplates, setSelectedCoverTemplates] = useState(COVER_TEMPLATES.map(t => t.id))
   const abortRef = useRef(false)
+  const [splitModalOpen, setSplitModalOpen] = useState(false)
+  const [splitMode, setSplitMode] = useState('byParts') // 'byParts' | 'byCount'
+  const [splitValue, setSplitValue] = useState(2)
 
   const validShops = shops.filter(s => s.products.length > 0 && s.accounts.length > 0)
 
@@ -622,6 +626,22 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
     }
   }
 
+  const handleSplitExcel = async () => {
+    if (!splitValue || splitValue < 1) {
+      alert('请输入有效的数值')
+      return
+    }
+    setSplitModalOpen(false)
+    try {
+      const result = await splitExcelFile({ mode: splitMode, value: splitValue })
+      const detail = result.rowsPerFile.map((n, i) => `第${i + 1}份 ${n}条`).join('、')
+      alert(`分割完成！共 ${result.totalRows} 条数据，分成 ${result.fileCount} 个文件（${detail}）`)
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      alert(`分割失败：${err.message || err}`)
+    }
+  }
+
   return (
     <div className="panel">
       <h2>🚀 批量生成</h2>
@@ -895,7 +915,116 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
         >
           🔀 打乱行顺序
         </button>
+        <button
+          className="btn-secondary btn-large"
+          onClick={() => setSplitModalOpen(true)}
+          disabled={generating}
+          title="把一个 Excel 分割成多个文件"
+        >
+          ✂️ 分割 Excel
+        </button>
       </div>
+
+      {/* 分割 Excel 弹窗 */}
+      {splitModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 9999,
+        }} onClick={() => setSplitModalOpen(false)}>
+          <div style={{
+            background: '#fff', borderRadius: 16, padding: '28px 32px', width: 420,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.15)', maxWidth: '90vw',
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 18 }}>✂️ 分割 Excel</h3>
+
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <button
+                  onClick={() => setSplitMode('byParts')}
+                  style={{
+                    flex: 1, padding: '10px 0', borderRadius: 8, border: '2px solid',
+                    borderColor: splitMode === 'byParts' ? '#4caf50' : '#ddd',
+                    background: splitMode === 'byParts' ? '#e8f5e9' : '#fafafa',
+                    color: splitMode === 'byParts' ? '#2e7d32' : '#666',
+                    fontWeight: 600, cursor: 'pointer', fontSize: 13,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  按份数分割
+                </button>
+                <button
+                  onClick={() => setSplitMode('byCount')}
+                  style={{
+                    flex: 1, padding: '10px 0', borderRadius: 8, border: '2px solid',
+                    borderColor: splitMode === 'byCount' ? '#4caf50' : '#ddd',
+                    background: splitMode === 'byCount' ? '#e8f5e9' : '#fafafa',
+                    color: splitMode === 'byCount' ? '#2e7d32' : '#666',
+                    fontWeight: 600, cursor: 'pointer', fontSize: 13,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  按每份条数
+                </button>
+              </div>
+
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '14px 16px', background: '#f5f5f5', borderRadius: 10,
+              }}>
+                <span style={{ fontSize: 13, color: '#555', whiteSpace: 'nowrap' }}>
+                  {splitMode === 'byParts' ? '分成' : '每份'}
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={splitMode === 'byParts' ? 100 : 10000}
+                  value={splitValue}
+                  onChange={e => setSplitValue(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{
+                    width: 80, height: 36, textAlign: 'center', borderRadius: 8,
+                    border: '2px solid #4caf50', fontSize: 16, fontWeight: 700,
+                    outline: 'none',
+                  }}
+                />
+                <span style={{ fontSize: 13, color: '#555', whiteSpace: 'nowrap' }}>
+                  {splitMode === 'byParts' ? '份' : '条笔记'}
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: 12, color: '#888', lineHeight: 1.6, margin: '0 0 18px' }}>
+              {splitMode === 'byParts'
+                ? '将 Excel 中的数据平均分成指定份数，余数会分配给前几个文件'
+                : '每个分割后的文件包含指定条数的笔记，最后一个文件可能不足该数量'}
+              <br />
+              📌 笔记的商品、文案、图片会保持一一对应，不会错乱
+            </p>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setSplitModalOpen(false)}
+                style={{
+                  padding: '10px 24px', borderRadius: 8, border: '1px solid #ddd',
+                  background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14,
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSplitExcel}
+                style={{
+                  padding: '10px 24px', borderRadius: 8, border: 'none',
+                  background: '#4caf50', color: '#fff', cursor: 'pointer',
+                  fontSize: 14, fontWeight: 600,
+                }}
+              >
+                选择文件并分割
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

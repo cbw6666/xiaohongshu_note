@@ -114,6 +114,8 @@ function parseAnchors(drawingXml) {
   while ((match = anchorRegex.exec(drawingXml)) !== null) {
     const anchorXml = match[0]
     const type = match[1]
+    const startIndex = match.index
+    const endIndex = startIndex + anchorXml.length
 
     // 提取 <xdr:from><xdr:row>X</xdr:row>
     const fromRowMatch = anchorXml.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/)
@@ -126,38 +128,69 @@ function parseAnchors(drawingXml) {
       toRow = toRowMatch ? parseInt(toRowMatch[1], 10) : fromRow
     }
 
-    anchors.push({ xml: anchorXml, type, fromRow, toRow })
+    anchors.push({ xml: anchorXml, type, fromRow, toRow, startIndex, endIndex })
   }
   return anchors
 }
 
 /**
- * 修改 anchor XML 中的行号
- * rowMapping: Map<oldRow, newRow>
+ * 修改 anchor XML 中的行号（修复版）
+ * 使用偏移量方式：from.row 查映射得到新位置，to.row 保持与 from 的相对偏移不变
+ * rowMapping: Map<oldRow0based, newRow0based>
  */
-function remapAnchorRows(anchorXml, anchorType, rowMapping) {
+function remapAnchorRows(anchorXml, anchorType, fromRow, toRow, rowMapping) {
+  const newFromRow = rowMapping.get(fromRow)
+  if (newFromRow === undefined) return anchorXml
+
   let result = anchorXml
 
   // 修改 <xdr:from> 中的 <xdr:row>
   result = result.replace(
     /(<xdr:from>[\s\S]*?<xdr:row>)(\d+)(<\/xdr:row>)/,
-    (full, before, oldRow, after) => {
-      const newRow = rowMapping.get(parseInt(oldRow, 10))
-      return newRow !== undefined ? `${before}${newRow}${after}` : full
-    }
+    (full, before, _oldRow, after) => `${before}${newFromRow}${after}`
   )
 
   // 修改 <xdr:to> 中的 <xdr:row>（twoCellAnchor）
+  // 使用偏移量保持图片跨行数不变：newToRow = newFromRow + (toRow - fromRow)
   if (anchorType === 'twoCellAnchor') {
+    const delta = toRow - fromRow
+    const newToRow = newFromRow + delta
     result = result.replace(
       /(<xdr:to>[\s\S]*?<xdr:row>)(\d+)(<\/xdr:row>)/,
-      (full, before, oldRow, after) => {
-        const newRow = rowMapping.get(parseInt(oldRow, 10))
-        return newRow !== undefined ? `${before}${newRow}${after}` : full
-      }
+      (full, before, _oldRow, after) => `${before}${newToRow}${after}`
     )
   }
 
+  return result
+}
+
+/**
+ * 一次性重建 drawing XML：从后向前替换所有 anchor，避免交叉替换问题
+ */
+function rebuildDrawingXml(drawingXml, anchors, rowMapping) {
+  const replacements = []
+  for (const anchor of anchors) {
+    const newAnchorXml = remapAnchorRows(
+      anchor.xml, anchor.type, anchor.fromRow, anchor.toRow, rowMapping
+    )
+    if (newAnchorXml !== anchor.xml) {
+      replacements.push({
+        startIndex: anchor.startIndex,
+        endIndex: anchor.endIndex,
+        newXml: newAnchorXml,
+      })
+    }
+  }
+
+  if (replacements.length === 0) return drawingXml
+
+  // 从后向前替换，保证前面的 index 不受影响
+  replacements.sort((a, b) => b.startIndex - a.startIndex)
+
+  let result = drawingXml
+  for (const r of replacements) {
+    result = result.slice(0, r.startIndex) + r.newXml + result.slice(r.endIndex)
+  }
   return result
 }
 
@@ -295,17 +328,12 @@ export async function shuffleExcelRows() {
     }
 
     for (const drawingFile of drawingFiles) {
-      let drawingXml = await drawingFile.async('string')
+      const drawingXml = await drawingFile.async('string')
       const anchors = parseAnchors(drawingXml)
 
-      for (const anchor of anchors) {
-        const newAnchorXml = remapAnchorRows(anchor.xml, anchor.type, drawingRowMapping)
-        if (newAnchorXml !== anchor.xml) {
-          drawingXml = drawingXml.replace(anchor.xml, newAnchorXml)
-        }
-      }
-
-      zip.file(drawingFile.name, drawingXml)
+      // 一次性重建 drawing XML，避免交叉替换
+      const newDrawingXml = rebuildDrawingXml(drawingXml, anchors, drawingRowMapping)
+      zip.file(drawingFile.name, newDrawingXml)
     }
   }
 
