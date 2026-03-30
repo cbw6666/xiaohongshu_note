@@ -525,7 +525,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                   text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 内页图去重...`,
                 })
                 for (const img of rawInnerImages) {
-                  dedupedInnerImages.push(await deduplicateImage(img))
+                  dedupedInnerImages.push(await deduplicateImage(img, { addBorder: false }))
                 }
               }
               innerImageCount = dedupedInnerImages.length

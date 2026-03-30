@@ -132,6 +132,7 @@ export async function deduplicateImage(base64Src, options = {}) {
     saturationShift = randomRange(-0.05, 0.05),
     colorTempR = randomInt(-3, 3),
     colorTempB = randomInt(-3, 3),
+    addBorder = true,
     // 彩色相框边框：颜色可由外部传入（同一篇笔记共享），宽度按图片短边 3%~5%
     borderColor = null,
     overlayOpacity = randomRange(0.01, 0.02),
@@ -264,6 +265,10 @@ export async function deduplicateImage(base64Src, options = {}) {
   ctx.font = `${emojiSize}px serif`
   ctx.fillText(emoji, emojiX, emojiY)
   ctx.globalAlpha = 1.0
+
+  if (!addBorder) {
+    return canvas.toDataURL('image/jpeg', quality)
+  }
 
   // ---- 步骤 9：彩色相框边框（HSL 约束随机，保证好看）----
   const color = borderColor || randomBorderColor()
