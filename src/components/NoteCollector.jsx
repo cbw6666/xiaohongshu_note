@@ -29,7 +29,7 @@ function formatCountdown(ms) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-export default function NoteCollector({ settings, shops = [], activeShopId }) {
+export default function NoteCollector({ settings, shops = [], activeShopId, onImportTitlesForFission }) {
   // Excel 数据
   const [excelData, setExcelData] = useState(null) // { headers, columnMapping, rows }
   const [notes, setNotes] = useState([]) // 解析后的笔记列表
@@ -51,6 +51,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
   const [selectedAccountId, setSelectedAccountId] = useState(initAccount?.id || '')
 
   const selectedShop = shops.find(s => s.id === selectedShopId) || null
+  const selectedProduct = selectedShop?.products?.find(p => p.id === selectedProductId) || null
 
   // 统一设置
   const [globalSettings, setGlobalSettings] = useState({
@@ -494,6 +495,51 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
     }))
     abortRef.current = null
   }, [notes, settings, globalSettings])
+
+  const handleImportTitlesToFission = useCallback(() => {
+    if (typeof onImportTitlesForFission !== 'function') return
+
+    const normalizeProductKey = (value = '') =>
+      String(value || '')
+        .replace(/\s+/g, '')
+        .replace(/预览/g, '')
+        .trim()
+        .toLowerCase()
+
+    const selectedProductItemId = String(extractItemId(selectedProduct) || globalSettings.productItemId || '').trim()
+    const selectedProductKey = normalizeProductKey(selectedProduct?.name || globalSettings.productName || '')
+
+    const seen = new Set()
+    const titleList = []
+
+    notes.forEach((note) => {
+      const noteItemId = String(note?.productItemId || '').trim()
+      const noteProductKey = normalizeProductKey(note?.productName || '')
+
+      let matchedCurrentProduct = false
+      if (selectedProductItemId) {
+        matchedCurrentProduct = Boolean(noteItemId) && noteItemId === selectedProductItemId
+      } else if (selectedProductKey) {
+        matchedCurrentProduct = Boolean(noteProductKey) && noteProductKey === selectedProductKey
+      }
+      if (!matchedCurrentProduct) return
+
+      const title = String(note?.title || '').replace(/\s+/g, ' ').trim()
+      if (!title) return
+      const key = title.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      titleList.push(title)
+    })
+
+    if (titleList.length === 0) {
+      const currentName = selectedProduct?.name || globalSettings.productName || '当前商品'
+      alert(`当前商品「${currentName}」没有可导入的采集标题，请先采集该商品链接`)
+      return
+    }
+
+    onImportTitlesForFission(titleList)
+  }, [notes, onImportTitlesForFission, selectedProduct, globalSettings.productItemId, globalSettings.productName])
 
   // ============ 一键采集 + 处理 + 导出 Excel（流式写入） ============
   const [oneClickProgress, setOneClickProgress] = useState(null) // { phase, completed, total, text }
@@ -1374,6 +1420,16 @@ export default function NoteCollector({ settings, shops = [], activeShopId }) {
               >
                 ✍️ 一键改写正文
               </button>
+          )}
+          {notes.length > 0 && (
+            <button
+              className="btn-secondary btn-sm"
+              onClick={handleImportTitlesToFission}
+              disabled={isBusy}
+              title="把采集到的标题导入标题裂变输入框"
+            >
+              馃摜 导入标题裂变
+            </button>
           )}
           {(isBusy || isResting) && !isOneClick && (
             <button className="btn-danger btn-sm" onClick={handleStop}>

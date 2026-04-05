@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { callAI, calcTitleLen } from '../services/aiService.js'
 import {
   buildAnalyzeTitlesPrompt,
@@ -6,9 +6,17 @@ import {
   parseFissionResult,
   fixOverLimitTitle,
 } from '../services/titleFissionService.js'
+import { appendTitleVariants, validateTitleVariantAgainstProduct } from '../services/titleVariantService.js'
 import { loadFissionData, saveFissionData } from '../utils/storage.js'
 
-export default function TitleFission({ settings }) {
+export default function TitleFission({
+  settings,
+  shops = [],
+  activeShopId = '',
+  onUpdateShop,
+  importedTitlesText = '',
+  importedTitlesNonce = 0,
+}) {
   // === 状态 ===
   const [step, setStep] = useState(1) // 当前步骤 1-5
   const [titles, setTitles] = useState('') // 爆款标题输入（每行一个）
@@ -20,8 +28,63 @@ export default function TitleFission({ settings }) {
   const [history, setHistory] = useState(() => loadFissionData()) // 历史记录
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
   const [copied, setCopied] = useState(null) // 复制反馈
   const abortRef = useRef(null)
+  const [selectedShopId, setSelectedShopId] = useState(activeShopId || shops[0]?.id || '')
+  const [selectedProductId, setSelectedProductId] = useState('')
+  const importedNonceRef = useRef(0)
+
+  useEffect(() => {
+    const fallbackShopId = activeShopId || shops[0]?.id || ''
+    setSelectedShopId(prev => {
+      if (prev && shops.some(shop => shop.id === prev)) return prev
+      return fallbackShopId
+    })
+  }, [activeShopId, shops])
+
+  const selectedShop = shops.find(shop => shop.id === selectedShopId) || null
+  const selectableProducts = selectedShop?.products || []
+  const selectedProduct = selectableProducts.find(item => item.id === selectedProductId) || null
+
+  useEffect(() => {
+    if (!selectedShop) {
+      setSelectedProductId('')
+      return
+    }
+    setSelectedProductId(prev => {
+      if (prev && selectableProducts.some(item => item.id === prev)) return prev
+      return selectableProducts[0]?.id || ''
+    })
+  }, [selectedShopId, selectableProducts.length])
+
+  useEffect(() => {
+    if (!selectedProduct || useKeyword) return
+    setProduct(prev => ({
+      ...prev,
+      name: selectedProduct.name || '',
+      description: selectedProduct.description || '',
+      audience: selectedProduct.audience || '',
+      sellingPoints: selectedProduct.sellingPoints || '',
+    }))
+  }, [selectedProductId, useKeyword])
+
+  useEffect(() => {
+    if (!importedTitlesText || !importedTitlesNonce) return
+    if (importedNonceRef.current === importedTitlesNonce) return
+    importedNonceRef.current = importedTitlesNonce
+
+    const list = String(importedTitlesText || '')
+      .split(/\r?\n/)
+      .map(item => item.trim())
+      .filter(Boolean)
+    if (list.length === 0) return
+
+    setTitles(list.join('\n'))
+    setStep(1)
+    setError('')
+    setStatusMessage(`已从笔记采集导入 ${list.length} 条标题`)
+  }, [importedTitlesText, importedTitlesNonce])
 
   // 步骤标签
   const STEPS = [
@@ -37,6 +100,7 @@ export default function TitleFission({ settings }) {
 
   // === 步骤1：分析爆款标题 ===
   const handleAnalyze = useCallback(async () => {
+    setStatusMessage('')
     if (titleList.length < 3) {
       setError('请至少输入3个爆款标题')
       return
@@ -62,6 +126,7 @@ export default function TitleFission({ settings }) {
 
   // === 步骤4：裂变生成 ===
   const handleFission = useCallback(async () => {
+    setStatusMessage('')
     if (!analysis) {
       setError('请先完成爆款标题分析')
       return
@@ -117,6 +182,7 @@ export default function TitleFission({ settings }) {
 
     setLoading(true)
     setError('')
+    setStatusMessage('')
     try {
       const fixed = await fixOverLimitTitle(settings, item.title, item.formula)
       setResults(prev => prev.map((r, i) => i === idx ? { ...r, title: fixed.title, len: fixed.len, overLimit: fixed.overLimit } : r))
@@ -129,6 +195,7 @@ export default function TitleFission({ settings }) {
 
   // === 复制单条标题 ===
   const handleCopy = useCallback((title, idx) => {
+    setStatusMessage('')
     navigator.clipboard.writeText(title).then(() => {
       setCopied(idx)
       setTimeout(() => setCopied(null), 1500)
@@ -137,6 +204,7 @@ export default function TitleFission({ settings }) {
 
   // === 批量复制所有标题 ===
   const handleCopyAll = useCallback(() => {
+    setStatusMessage('')
     const text = results.map((r, i) => `${i + 1}. ${r.title}`).join('\n')
     navigator.clipboard.writeText(text).then(() => {
       setCopied('all')
@@ -146,6 +214,7 @@ export default function TitleFission({ settings }) {
 
   // === 从历史恢复 ===
   const handleRestoreHistory = useCallback((record) => {
+    setStatusMessage('')
     setResults(record.results)
     setStep(5)
   }, [])
@@ -162,6 +231,105 @@ export default function TitleFission({ settings }) {
     setHistory([])
     saveFissionData([])
   }, [])
+
+  const handleChooseProduct = useCallback((shopId, productId) => {
+    setSelectedShopId(shopId)
+    setSelectedProductId(productId)
+    const shop = shops.find(item => item.id === shopId)
+    const productItem = shop?.products?.find(item => item.id === productId)
+    if (!productItem) return
+    setUseKeyword(false)
+    setProduct(prev => ({
+      ...prev,
+      name: productItem.name || '',
+      description: productItem.description || '',
+      audience: productItem.audience || '',
+      sellingPoints: productItem.sellingPoints || '',
+    }))
+    setError('')
+    setStatusMessage('')
+  }, [shops])
+
+  const handleSaveToProduct = useCallback(async () => {
+    setError('')
+    setStatusMessage('')
+
+    if (!selectedShop || !selectedProduct) {
+      setError('请先选择要保存到的商品。')
+      return
+    }
+    if (results.length === 0) {
+      setError('当前没有可保存的标题。')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const normalizedItems = []
+      const savedIndexes = new Map()
+
+      for (let index = 0; index < results.length; index += 1) {
+        const item = results[index]
+        let nextTitle = String(item.title || '').trim()
+        let nextLen = calcTitleLen(nextTitle)
+        let overLimit = nextLen > 20
+
+        if (overLimit) {
+          const fixed = await fixOverLimitTitle(settings, nextTitle, item.formula)
+          nextTitle = String(fixed.title || nextTitle).trim()
+          nextLen = fixed.len
+          overLimit = fixed.overLimit
+        }
+
+        if (overLimit || !nextTitle) continue
+
+        const validation = validateTitleVariantAgainstProduct(selectedProduct, nextTitle)
+        if (!validation.valid) continue
+
+        normalizedItems.push({
+          title: nextTitle,
+          formula: item.formula,
+          enabled: true,
+          source: 'fission',
+          createdAt: new Date().toISOString(),
+        })
+        savedIndexes.set(index, {
+          title: nextTitle,
+          len: nextLen,
+          overLimit: false,
+        })
+      }
+
+      if (normalizedItems.length === 0) {
+        setError('没有可保存的标题。请先修复超长标题，或换一批更贴合商品的裂变标题。')
+        setLoading(false)
+        return
+      }
+
+      const updatedShop = {
+        ...selectedShop,
+        products: (selectedShop.products || []).map(item => {
+          if (item.id !== selectedProduct.id) return item
+          return appendTitleVariants(item, normalizedItems)
+        }),
+      }
+
+      onUpdateShop?.(updatedShop)
+
+      setResults(prev => prev.map((item, index) => {
+        const saved = savedIndexes.get(index)
+        return saved
+          ? { ...item, title: saved.title, len: saved.len, overLimit: saved.overLimit }
+          : item
+      }))
+
+      setStatusMessage(`已保存 ${normalizedItems.length} 条标题到商品「${selectedProduct.name}」标题池。`)
+    } catch (e) {
+      setError(`保存到商品标题池失败：${e.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [onUpdateShop, results, selectedProduct, selectedShop, settings])
 
   // 配置检查
   const configOk = settings.apiKey && settings.endpointId
@@ -220,6 +388,16 @@ export default function TitleFission({ settings }) {
           <button onClick={() => setError('')} style={{
             background: 'none', border: 'none', cursor: 'pointer', color: '#999', fontSize: 14,
           }}>✕</button>
+        </div>
+      )}
+
+      {statusMessage && (
+        <div style={{
+          padding: '10px 14px', marginBottom: 16, borderRadius: 8,
+          background: '#f0fff4', border: '1px solid #9ae6b4', color: '#276749',
+          fontSize: 13,
+        }}>
+          {statusMessage}
         </div>
       )}
 
@@ -371,6 +549,34 @@ export default function TitleFission({ settings }) {
             </div>
           ) : (
             <>
+              {shops.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div className="form-group">
+                    <label>关联店铺</label>
+                    <select
+                      value={selectedShopId}
+                      onChange={e => handleChooseProduct(e.target.value, shops.find(shop => shop.id === e.target.value)?.products?.[0]?.id || '')}
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    >
+                      {shops.map(item => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>关联商品</label>
+                    <select
+                      value={selectedProductId}
+                      onChange={e => handleChooseProduct(selectedShopId, e.target.value)}
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    >
+                      {selectableProducts.map(item => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
               <div className="form-group">
                 <label>商品名称 <span style={{ color: '#e53e3e' }}>*</span></label>
                 <input
@@ -483,6 +689,15 @@ export default function TitleFission({ settings }) {
               )}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
+              {!useKeyword && selectedProduct && (
+                <button
+                  className="btn-primary btn-sm"
+                  disabled={loading || results.length === 0}
+                  onClick={handleSaveToProduct}
+                >
+                  保存到商品标题池
+                </button>
+              )}
               <button
                 className="btn-secondary btn-sm"
                 onClick={handleCopyAll}

@@ -24,6 +24,7 @@ export default function App() {
   const [shops, setShops] = useState(loadShops)
   const [generated, setGenerated] = useState(loadGenerated)
   const [innerImagesMap, setInnerImagesMap] = useState({}) // { [productId]: [base64...] }
+  const [fissionPrefill, setFissionPrefill] = useState({ text: '', nonce: 0 })
   const [storageWarning, setStorageWarning] = useState(null)
   const [activeShopId, setActiveShopId] = useState(() => {
     const s = loadShops()
@@ -58,6 +59,16 @@ export default function App() {
   const handleGenerated = (newNotes) => {
     setGenerated(prev => [...newNotes, ...prev])
     setActiveTab('generate')
+  }
+
+  const handleImportCollectorTitles = (titles = []) => {
+    const list = Array.isArray(titles) ? titles.map(item => String(item || '').trim()).filter(Boolean) : []
+    if (list.length === 0) return
+    setFissionPrefill({
+      text: list.join('\n'),
+      nonce: Date.now(),
+    })
+    setActiveTab('fission')
   }
 
   const configOk = settings.apiKey && settings.endpointId
@@ -158,6 +169,7 @@ export default function App() {
             settings={settings}
             shops={shops}
             onGenerated={handleGenerated}
+            onUpdateShops={setShops}
             innerImagesMap={innerImagesMap}
           />
         )}
@@ -167,11 +179,19 @@ export default function App() {
             settings={settings}
             shops={shops}
             activeShopId={activeShopId}
+            onImportTitlesForFission={handleImportCollectorTitles}
           />
         )}
 
         {activeTab === 'fission' && (
-          <TitleFission settings={settings} />
+          <TitleFission
+            settings={settings}
+            shops={shops}
+            activeShopId={activeShopId}
+            onUpdateShop={handleUpdateShop}
+            importedTitlesText={fissionPrefill.text}
+            importedTitlesNonce={fissionPrefill.nonce}
+          />
         )}
 
         {activeTab === 'covers' && (
