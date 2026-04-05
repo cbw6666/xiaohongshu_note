@@ -13,7 +13,6 @@ import { perturbContent, perturbTitle } from '../services/textPerturbation.js'
 import {
   buildSeoPlan,
   buildSeoPromptSection,
-  buildRetitleSeoPromptSection,
   enforceSeoResult,
   getProtectedKeywords,
   auditSeoTextResult,
@@ -26,12 +25,50 @@ import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
 import { splitExcelFile } from '../utils/excelSplitUtils.js'
 import { renderCoverToBlob } from '../utils/coverRenderer.js'
 import { normalizeCoverVariants, pickCoverVariant } from '../services/coverVariantService.js'
+import { normalizeTitleVariants, pickTitleVariant, validateTitleVariantAgainstProduct } from '../services/titleVariantService.js'
 
 const MAX_TITLE_LEN = 20
 const TITLE_RETRY_LIMIT = 10
-const DUPLICATE_TITLE_RETRY_LIMIT = 3
 const MAX_GENERATION_ATTEMPTS = 5
+const TITLE_QUALITY_RETRY_LIMIT = 4
+const TITLE_HISTORY_LIMIT = 8
+const TITLE_STRUCTURE_HISTORY_LIMIT = 8
 const TITLE_VARIATION_ANGLES = ['warning', 'contrast', 'result', 'question', 'pitfall-avoidance', 'recommendation']
+const GENERIC_TITLE_TOKENS = ['攻略', '资料', '教程', '模板', '大全', '合集', '笔记', '真题', '题库', '汇总', '总结', '电子版', '打印版']
+const PRODUCT_TERM_STOPWORDS = new Set([
+  '攻略',
+  '资料',
+  '教程',
+  '模板',
+  '大全',
+  '合集',
+  '笔记',
+  '真题',
+  '题库',
+  '汇总',
+  '总结',
+  '电子版',
+  '打印版',
+  '学习',
+  '备考',
+  '提分',
+  '上岸',
+  '速背',
+  '速记',
+  '重点',
+  '高频',
+  '精选',
+  '最新',
+  '新版',
+  '全套',
+  '完整',
+  '必备',
+  '冲刺',
+  '干货',
+  '收藏',
+  '分享',
+  '预览',
+])
 
 function truncateTitleByLen(title, maxLen = MAX_TITLE_LEN) {
   if (!title) return ''
@@ -50,6 +87,200 @@ function normalizeTitleKey(title = '') {
   return String(title || '')
     .replace(/[\s,，。.!！？?、:：;；"'“”‘’()（）【】\[\]<>《》\-—_~]/g, '')
     .toLowerCase()
+}
+
+function sanitizeProductName(name = '') {
+  return String(name || '')
+    .replace(/\n?\s*商品\s*ID\s*[:：]?\s*[\s\S]*/i, '')
+    .replace(/\n?\s*预览\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function stripGenericProductSuffix(value = '') {
+  let next = String(value || '').replace(/^\d{2,4}(?:年)?/, '').trim()
+  let prev = ''
+
+  while (next && prev !== next) {
+    prev = next
+    next = next
+      .replace(/(资料大全|备考资料|学习资料|笔记模板|历年真题|真题模板|真题汇编|题库汇总|题库|汇总|总结|大全|模板|模版|资料|教程|课程|教材|讲义|笔记|电子版|打印版|冲刺卷|预测卷|五色笔记|三色笔记|四色笔记|预览)$/g, '')
+      .trim()
+  }
+
+  return next
+}
+
+function extractTermCandidates(value = '') {
+  return String(value || '')
+    .split(/[\n\r,，。；;、|/]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function explodeCompactNameTerms(value = '') {
+  return String(value || '')
+    .split(/(?:备考|学习|复习|资料|模板|模版|笔记|真题|题库|汇总|总结|大全|电子版|打印版|全套|冲刺|速记|速背|高频|专项|精选|最新|新版|历年|教材|讲义|题集|题本|宝典|题单|题包)+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function extractSpecializedNameTerms(value = '') {
+  const text = String(value || '')
+  const matches = new Set()
+  const patterns = [
+    /[\u4e00-\u9fa5A-Za-z]{2,}(项目管理师|项目管理工程师|统计师|工程师|教师|英语|语文|数学|面试|申论|行测|教资|事业编|公务员|系统集成|软考|高项|中项)/g,
+    /(高项|中项|软考|教资|申论|行测|面试|英语|语文|数学|统计师|系统集成|学位英语)/g,
+  ]
+
+  patterns.forEach((pattern) => {
+    for (const match of text.matchAll(pattern)) {
+      if (match?.[0]) matches.add(match[0])
+    }
+  })
+
+  return [...matches]
+}
+
+function normalizeProductTerm(term = '') {
+  return String(term || '')
+    .replace(/^\d{2,4}(?:年)?/, '')
+    .replace(/^(最新|新版|全套|完整|精选|冲刺|必备|高频|速记|速背)+/, '')
+    .replace(/[【】[\]()（）]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+}
+
+function buildProductTermPool(product, cleanName = '') {
+  const terms = []
+  const addTerm = (value) => {
+    const term = normalizeProductTerm(value)
+    if (!term || term.length < 2) return
+    if (PRODUCT_TERM_STOPWORDS.has(term)) return
+    if (/^\d+$/.test(term)) return
+    terms.push(term)
+  }
+
+  const sanitizedName = sanitizeProductName(cleanName || product?.name || '')
+  const strippedName = stripGenericProductSuffix(sanitizedName)
+
+  addTerm(sanitizedName)
+  addTerm(strippedName)
+  extractTermCandidates(sanitizedName).forEach(addTerm)
+  extractTermCandidates(strippedName).forEach(addTerm)
+  explodeCompactNameTerms(sanitizedName).forEach(addTerm)
+  explodeCompactNameTerms(strippedName).forEach(addTerm)
+  extractSpecializedNameTerms(sanitizedName).forEach(addTerm)
+  extractSpecializedNameTerms(strippedName).forEach(addTerm)
+  extractTermCandidates(product?.sellingPoints || '').forEach(addTerm)
+
+  const seen = new Set()
+  const uniqueTerms = terms.filter((term) => {
+    const key = term.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  return uniqueTerms
+    .filter((term) => !GENERIC_TITLE_TOKENS.includes(term))
+    .sort((a, b) => b.length - a.length)
+}
+
+function findMatchedProductTerm(title = '', termPool = []) {
+  const normalizedTitle = normalizeTitleKey(title)
+  return termPool.find((term) => normalizedTitle.includes(normalizeTitleKey(term))) || ''
+}
+
+function getTitleStructureSignature(title = '') {
+  const compact = String(title || '').replace(/\s+/g, '').trim()
+  const parts = []
+
+  if (/\d/.test(compact)) parts.push('number')
+  if (/[?？吗呢]/.test(compact)) parts.push('question')
+  if (/(别再|不要|不是|而是|却|反而|原来|竟然|vs|VS)/.test(compact)) parts.push('contrast')
+  if (/(小白|零基础|考生|学生党|上班族|宝妈|姐妹|家长)/.test(compact)) parts.push('identity')
+  if (/(上岸|提分|逆袭|通关|高分|稳住|拿下|冲刺)/.test(compact)) parts.push('result')
+  if (/(救命|绝了|离谱|太香|神了|快看|收藏|终于|真的|直接)/.test(compact) || /[!！]/.test(compact)) parts.push('emotion')
+  if (/(先别|别急|原来|其实|后来|居然|没想到|……|\.\.\.)/.test(compact)) parts.push('suspense')
+
+  if (parts.length === 0) parts.push('plain')
+  return parts.join('|')
+}
+
+function hasStrongTitleHook(title = '') {
+  return getTitleStructureSignature(title) !== 'plain'
+}
+
+function isBlandTitle(title = '', termPool = []) {
+  const compact = String(title || '').replace(/\s+/g, '').trim()
+  if (!compact) return true
+
+  const hasHook = hasStrongTitleHook(compact)
+  const genericEnding = new RegExp(`(${GENERIC_TITLE_TOKENS.join('|')})$`)
+  const fallbackPattern = /(这样更稳|别踩坑|怎么选|有必要吗)$/
+  const productHit = findMatchedProductTerm(compact, termPool)
+
+  if (fallbackPattern.test(compact)) return true
+  if (genericEnding.test(compact) && !hasHook) return true
+  if (productHit && compact.length <= 12 && !hasHook) return true
+
+  return false
+}
+
+function assessGeneratedTitle({ title, termPool = [], seenTitleKeys, recentTitleStructures = [] }) {
+  const normalized = normalizeTitleKey(title)
+  const matchedTerm = findMatchedProductTerm(title, termPool)
+  const structure = getTitleStructureSignature(title)
+  const recentSameStructure = recentTitleStructures.slice(-3).filter((item) => item === structure).length
+  const reasons = []
+
+  if (!normalized) {
+    reasons.push('标题为空')
+  } else {
+    if (calcTitleLen(title) > MAX_TITLE_LEN) reasons.push(`标题超过${MAX_TITLE_LEN}字`)
+    if (!matchedTerm) reasons.push('标题没有带商品相关词')
+    if (normalized && seenTitleKeys.has(normalized)) reasons.push('标题和之前重复')
+    if (isBlandTitle(title, termPool)) reasons.push('标题太平，像资料名或关键词拼接')
+    if (structure === 'plain' && recentSameStructure >= 1) reasons.push('标题结构太平')
+    if (structure !== 'plain' && recentSameStructure >= 2) reasons.push('标题句式和最近几篇太像')
+  }
+
+  return {
+    pass: reasons.length === 0,
+    reasons,
+    structure,
+    matchedTerm,
+    termPool,
+  }
+}
+
+function pickRepairTerm(termPool = []) {
+  const sorted = [...termPool].sort((a, b) => a.length - b.length)
+  return sorted.find((term) => term.length >= 3 && term.length <= 8) || sorted[0] || ''
+}
+
+function lightlyRepairTitleWithProductTerms(title = '', termPool = [], maxLen = MAX_TITLE_LEN) {
+  const rawTitle = String(title || '').replace(/\s+/g, '').trim()
+  if (!rawTitle) return rawTitle
+  if (findMatchedProductTerm(rawTitle, termPool)) return truncateTitleByLen(rawTitle, maxLen)
+
+  const repairTerm = pickRepairTerm(termPool)
+  if (!repairTerm) return truncateTitleByLen(rawTitle, maxLen)
+
+  const candidates = [
+    `${repairTerm}${rawTitle}`,
+    `${repairTerm}：${rawTitle}`,
+    rawTitle.replace(/^(这份|这个|真的|终于|直接|别再|先别|一定要)/, repairTerm),
+    `${rawTitle}${repairTerm}`,
+  ]
+
+  for (const candidate of candidates) {
+    const next = truncateTitleByLen(candidate, maxLen)
+    if (findMatchedProductTerm(next, termPool)) return next
+  }
+
+  return truncateTitleByLen(rawTitle, maxLen)
 }
 
 function buildDuplicateTitleInstruction(recentTitles = [], attempt = 0) {
@@ -71,19 +302,37 @@ function buildDuplicateTitleInstruction(recentTitles = [], attempt = 0) {
   return lines.join('\n')
 }
 
+function buildTitleRepairInstruction({ audit, recentTitles = [], attempt = 0 }) {
+  const lines = [buildDuplicateTitleInstruction(recentTitles, attempt), '', 'Title repair goals:']
+
+  if (audit.reasons.some((reason) => reason.includes('商品相关词'))) {
+    lines.push('- Keep the title tied to the product. Naturally include one product term, category term, or selling-point term.')
+  }
+  if (audit.reasons.some((reason) => reason.includes('资料名') || reason.includes('关键词拼接') || reason.includes('结构太平'))) {
+    lines.push('- Do not write a plain keyword title like “XX攻略 / XX资料 / XX模板”. Keep a hook, emotion, contrast, question, or result angle.')
+  }
+  if (audit.reasons.some((reason) => reason.includes('重复') || reason.includes('句式'))) {
+    lines.push('- Change the sentence pattern clearly. Do not just swap one or two words.')
+  }
+  if (audit.termPool.length > 0) {
+    lines.push(`- Candidate product terms: ${audit.termPool.slice(0, 6).join(' / ')}`)
+  }
+
+  return lines.join('\n')
+}
+
 async function rewriteTitleWithGuidance({
   settings,
   currentTitle,
   content,
   productName,
-  seoPlan,
   titleStyleGuidance = '',
   extraInstruction = '',
 }) {
   const retitleMessages = buildRetitlePrompt(currentTitle, content, productName, { titleStyleGuidance })
   const sections = []
 
-  if (seoPlan) sections.push(buildRetitleSeoPromptSection(seoPlan))
+  sections.push('Keep the title tied to the product. Naturally include one product or category term, but do not turn it into a plain keyword title.')
   if (extraInstruction) sections.push(extraInstruction)
 
   if (sections.length > 0) {
@@ -93,7 +342,7 @@ async function rewriteTitleWithGuidance({
   return (await callAI(settings, retitleMessages)).trim()
 }
 
-export default function BatchGenerator({ settings, shops, onGenerated, innerImagesMap }) {
+export default function BatchGenerator({ settings, shops, onGenerated, onUpdateShops, innerImagesMap }) {
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0, text: '' })
   const [selectedShops, setSelectedShops] = useState([])
@@ -204,6 +453,8 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
     let failCount = 0
     const seenTitleKeys = new Set()
     const recentTitles = []
+    const recentTitleStructures = []
+    const titleCursorUpdates = new Map()
 
     // 对封面模板列表做 Fisher-Yates 打散，避免顺序模式过于规律
     const shuffledCoverTemplates = [...selectedCoverTemplates]
@@ -228,7 +479,9 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
         if (abortRef.current) break
         const noteCount = productConfig[product.id]?.count || 3
         const productCoverVariants = normalizeCoverVariants(product)
+        const productTitleVariants = normalizeTitleVariants(product).filter(item => validateTitleVariantAgainstProduct(product, item.title).valid)
         let productCoverSeq = 0
+        let productTitleSeq = Number.isFinite(Number(product.titleVariantCursor)) ? Number(product.titleVariantCursor) : 0
 
         for (const account of accounts) {
           if (abortRef.current) break
@@ -238,8 +491,14 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
 
             const currentCoverSeq = productCoverSeq
             const activeCoverVariant = pickCoverVariant(productCoverVariants, currentCoverSeq)
+            const currentTitleSeq = productTitleSeq
+            const activeTitleVariant = pickTitleVariant(productTitleVariants, currentTitleSeq)
             const coverTemplateId = activeCoverVariant?.coverTemplateId || product.customCoverTemplateId || safeFallbackCoverTemplates[count % safeFallbackCoverTemplates.length]
             productCoverSeq++
+            if (activeTitleVariant) {
+              productTitleSeq++
+              titleCursorUpdates.set(product.id, productTitleSeq)
+            }
 
             count++
             setProgress({
@@ -249,7 +508,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
             })
 
             // 清理商品名称中可能混入的商品ID等信息
-            const cleanName = (product.name || '').replace(/\n?\s*商品\s*ID\s*[:：]\s*[\s\S]*/i, '').replace(/\n?\s*预览\s*$/, '').trim()
+            const cleanName = sanitizeProductName(product.name || '')
             const itemId = product.productId || ((product.name || '').match(/商品\s*ID\s*[:：]\s*([a-zA-Z0-9]+)/i) || [])[1] || ''
             const seoPlan = buildSeoPlan(product, i)
             const titleStyleGuidance = buildTitleStyleGuidance(product, i)
@@ -283,25 +542,26 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 const parsed = parseNoteResponse(raw)
 
                 // 校验标题字数，超过20字则重新生成标题，重试到满足要求为止
-                let finalTitle = parsed.title
-                let retitleAttempt = 0
-                while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < TITLE_RETRY_LIMIT) {
-                  retitleAttempt++
-                  try {
-                    const newTitle = await rewriteTitleWithGuidance({
-                      settings,
-                      currentTitle: finalTitle,
-                      content: parsed.content,
-                      productName: product.name,
-                      seoPlan,
-                      titleStyleGuidance,
-                    })
-                    if (newTitle) finalTitle = newTitle
-                  } catch (e) {
+                let finalTitle = activeTitleVariant?.title || parsed.title
+                if (!activeTitleVariant) {
+                  let retitleAttempt = 0
+                  while (finalTitle && calcTitleLen(finalTitle) > MAX_TITLE_LEN && retitleAttempt < TITLE_RETRY_LIMIT) {
+                    retitleAttempt++
+                    try {
+                      const newTitle = await rewriteTitleWithGuidance({
+                        settings,
+                        currentTitle: finalTitle,
+                        content: parsed.content,
+                        productName: cleanName,
+                        titleStyleGuidance,
+                      })
+                      if (newTitle) finalTitle = newTitle
+                    } catch (e) {
                     console.warn(`重新生成标题失败(第${retitleAttempt}次):`, e)
+                    }
                   }
+                  finalTitle = truncateTitleByLen(finalTitle, MAX_TITLE_LEN)
                 }
-                finalTitle = truncateTitleByLen(finalTitle, MAX_TITLE_LEN)
 
                 let attemptTitle = finalTitle || `${cleanName}种草`
                 let attemptContent = parsed.content || raw
@@ -331,7 +591,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                 // 文本扰动（本地处理，不调用AI）— 进一步降低AI文本指纹
                 const protectedKeywords = seoPlan ? getProtectedKeywords(seoPlan) : []
                 attemptContent = perturbContent(attemptContent, { protectedKeywords })
-                if (!seoPlan) {
+                if (!seoPlan && !activeTitleVariant) {
                   attemptTitle = perturbTitle(attemptTitle, { protectedKeywords })
                 }
 
@@ -345,7 +605,6 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                     },
                     seoPlan,
                   )
-                  attemptTitle = seoFixed.title || attemptTitle
                   attemptContent = seoFixed.content || attemptContent
                   attemptTags = seoFixed.tags || attemptTags
                   attemptCoverTitle = seoFixed.coverTitle || attemptCoverTitle
@@ -377,7 +636,6 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                     const repairRaw = await callAI(settings, repairMessages)
                     const repaired = parseNoteResponse(repairRaw)
 
-                    attemptTitle = repaired.title || attemptTitle
                     attemptContent = repaired.content || attemptContent
                     attemptTags = repaired.tags || attemptTags
 
@@ -391,7 +649,6 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                       seoPlan,
                     )
 
-                    attemptTitle = repairedSeo.title || attemptTitle
                     attemptContent = repairedSeo.content || attemptContent
                     attemptTags = repairedSeo.tags || attemptTags
 
@@ -410,69 +667,80 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
                   }
                 }
 
-                let titleKey = normalizeTitleKey(attemptTitle)
-                if (titleKey && seenTitleKeys.has(titleKey)) {
-                  let dedupeAttempt = 0
+                if (!activeTitleVariant) {
+                  const productTermPool = buildProductTermPool(product, cleanName)
+                  attemptTitle = lightlyRepairTitleWithProductTerms(attemptTitle, productTermPool)
 
-                  while (dedupeAttempt < DUPLICATE_TITLE_RETRY_LIMIT && seenTitleKeys.has(titleKey)) {
-                    dedupeAttempt++
+                  let titleAudit = assessGeneratedTitle({
+                    title: attemptTitle,
+                    termPool: productTermPool,
+                    seenTitleKeys,
+                    recentTitleStructures,
+                  })
+                  let titleFixAttempt = 0
+
+                  while (!titleAudit.pass && titleFixAttempt < TITLE_QUALITY_RETRY_LIMIT) {
+                    titleFixAttempt++
+
+                    const repairedTitle = lightlyRepairTitleWithProductTerms(attemptTitle, productTermPool)
+                    if (repairedTitle && repairedTitle !== attemptTitle) {
+                      attemptTitle = repairedTitle
+                      titleAudit = assessGeneratedTitle({
+                        title: attemptTitle,
+                        termPool: productTermPool,
+                        seenTitleKeys,
+                        recentTitleStructures,
+                      })
+                      if (titleAudit.pass) break
+                    }
 
                     const variedTitle = await rewriteTitleWithGuidance({
                       settings,
                       currentTitle: attemptTitle,
                       content: attemptContent,
-                      productName: product.name,
-                      seoPlan,
+                      productName: cleanName,
                       titleStyleGuidance,
-                      extraInstruction: buildDuplicateTitleInstruction(recentTitles, dedupeAttempt),
+                      extraInstruction: buildTitleRepairInstruction({
+                        audit: titleAudit,
+                        recentTitles,
+                        attempt: titleFixAttempt,
+                      }),
                     })
 
                     if (!variedTitle) continue
 
-                    attemptTitle = truncateTitleByLen(variedTitle, MAX_TITLE_LEN)
-
-                    if (seoPlan) {
-                      const variedSeo = enforceSeoResult(
-                        {
-                          title: attemptTitle,
-                          content: attemptContent,
-                          tags: attemptTags,
-                          coverTitle: attemptCoverTitle,
-                        },
-                        seoPlan,
-                      )
-
-                      attemptTitle = variedSeo.title || attemptTitle
-                      attemptContent = variedSeo.content || attemptContent
-                      attemptTags = variedSeo.tags || attemptTags
-
-                      const variedAudit = auditSeoTextResult(
-                        {
-                          title: attemptTitle,
-                          content: attemptContent,
-                          tags: attemptTags,
-                        },
-                        seoPlan,
-                      )
-
-                      if (!variedAudit.pass) continue
-                    }
-
-                    titleKey = normalizeTitleKey(attemptTitle)
+                    attemptTitle = lightlyRepairTitleWithProductTerms(
+                      truncateTitleByLen(variedTitle, MAX_TITLE_LEN),
+                      productTermPool,
+                    )
+                    titleAudit = assessGeneratedTitle({
+                      title: attemptTitle,
+                      termPool: productTermPool,
+                      seenTitleKeys,
+                      recentTitleStructures,
+                    })
                   }
 
-                  if (titleKey && seenTitleKeys.has(titleKey)) {
-                    throw new Error('标题重复，重写后仍未通过去重')
-                  }
-                }
+                  titleAudit = assessGeneratedTitle({
+                    title: attemptTitle,
+                    termPool: productTermPool,
+                    seenTitleKeys,
+                    recentTitleStructures,
+                  })
 
-                // 扰动后再次校验标题字数
-                attemptTitle = truncateTitleByLen(attemptTitle, MAX_TITLE_LEN)
-                titleKey = normalizeTitleKey(attemptTitle)
-                if (titleKey) {
-                  seenTitleKeys.add(titleKey)
-                  recentTitles.push(attemptTitle)
-                  if (recentTitles.length > 8) recentTitles.shift()
+                  if (!titleAudit.pass) {
+                  throw new Error(`标题未通过质量检查: ${titleAudit.reasons.join('；')}`)
+                  }
+
+                  attemptTitle = truncateTitleByLen(attemptTitle, MAX_TITLE_LEN)
+                  const titleKey = normalizeTitleKey(attemptTitle)
+                  if (titleKey) {
+                    seenTitleKeys.add(titleKey)
+                    recentTitles.push(attemptTitle)
+                    recentTitleStructures.push(titleAudit.structure)
+                    if (recentTitles.length > TITLE_HISTORY_LIMIT) recentTitles.shift()
+                    if (recentTitleStructures.length > TITLE_STRUCTURE_HISTORY_LIMIT) recentTitleStructures.shift()
+                  }
                 }
 
                 noteTitle = attemptTitle
@@ -591,6 +859,17 @@ export default function BatchGenerator({ settings, shops, onGenerated, innerImag
     }
 
     // 写入汇总信息
+    if (titleCursorUpdates.size > 0 && typeof onUpdateShops === 'function') {
+      onUpdateShops((prev) => prev.map((shopItem) => ({
+        ...shopItem,
+        products: (shopItem.products || []).map((productItem) => (
+          titleCursorUpdates.has(productItem.id)
+            ? { ...productItem, titleVariantCursor: titleCursorUpdates.get(productItem.id) }
+            : productItem
+        )),
+      })))
+    }
+
     try {
       await writer.finalize({ total: count, success: successCount, fail: failCount })
     } catch (e) {

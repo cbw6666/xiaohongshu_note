@@ -898,7 +898,6 @@ export function enforceSeoResult(note, plan) {
   if (!plan) return note
   return {
     ...note,
-    title: enforceTitleKeywords(note.title || '', plan, 20),
     content: enforceBodyKeywordDistribution(note.content || '', plan),
     tags: enforceTagList(note.tags || '', plan),
     coverTitle: note.coverTitle || '',
@@ -906,7 +905,7 @@ export function enforceSeoResult(note, plan) {
 }
 
 export function auditSeoTextResult(note, plan) {
-  if (!plan) return { pass: true, issues: [], metrics: {} }
+  if (!plan) return { pass: true, issues: [], titleWarnings: [], metrics: {} }
 
   const title = String(note?.title || '').replace(/\s+/g, '').trim()
   const content = String(note?.content || '').trim()
@@ -920,6 +919,7 @@ export function auditSeoTextResult(note, plan) {
   const allowedTags = new Set(buildTagSet(plan, '').map((item) => compactWord(item)))
   const invalidTags = tags.filter((tag) => !allowedTags.has(compactWord(tag)))
   const issues = []
+  const titleWarnings = []
 
   if (!title.includes(plan.coreKeyword)) {
     issues.push(`标题缺少核心词：${plan.coreKeyword}`)
@@ -934,6 +934,9 @@ export function auditSeoTextResult(note, plan) {
   if (titleFragmentHits.length < 1 && plan.titleFragments.length > 0) {
     issues.push(`标题缺少高意图搜索片段：${plan.titleFragments[0]}`)
   }
+
+  titleWarnings.push(...issues)
+  issues.length = 0
 
   if (!introText.includes(plan.coreKeyword) || introFragmentHits.length < Math.min(2, Math.max(1, plan.bodyFragments.length))) {
     issues.push('正文开头缺少“核心词 + 长尾片段”的自然组合句')
@@ -958,6 +961,7 @@ export function auditSeoTextResult(note, plan) {
   return {
     pass: issues.length === 0,
     issues,
+    titleWarnings,
     metrics: {
       titleLength: calcTextLen(title),
       titleCoreIndex: title.indexOf(plan.coreKeyword),
@@ -972,7 +976,6 @@ export function auditSeoTextResult(note, plan) {
 
 export function buildSeoRepairPrompt(note, plan) {
   const audit = auditSeoTextResult(note, plan)
-  const titleFragments = plan.titleFragments.join(', ') || plan.coreKeyword
   const bodyFragments = plan.bodyFragments.join(', ') || plan.coreKeyword
   const tagFragments = buildTagSet(plan, '').join(', ') || plan.coreKeyword
 
@@ -980,39 +983,36 @@ export function buildSeoRepairPrompt(note, plan) {
     {
       role: 'system',
       content:
-        'You rewrite only title, body, and tags for XiaoHongShu SEO. Keep the style natural. Do not explain anything. Do not output any cover fields.',
+        'You rewrite only body and tags for XiaoHongShu SEO. Keep the style natural. Do not explain anything. Keep the title unchanged. Do not output any cover fields.',
     },
     {
       role: 'user',
-      content: `Rewrite only the title, body, and tags while keeping the original meaning and tone.
+      content: `Rewrite only the body and tags while keeping the original meaning and tone. Do not change the title.
 
 Core keyword: ${plan.coreKeyword}
-Preferred title phrases: ${titleFragments}
 Preferred body phrases: ${bodyFragments}
 Preferred tags: ${tagFragments}
 
 Requirements:
-1. The title must contain the core keyword within the first 10 characters.
-2. The title must include 1-2 high-intent search phrases and be no longer than 20 characters.
-3. In the first 2 sentences of the body, naturally include the core keyword and at least 2 search phrases.
-4. Cover at least 3 different search phrases across the body, and reinforce the core keyword once near the ending.
-5. Output 6-10 tags and only use the provided search phrases or tags.
-6. Do not use meta SEO phrasing such as "围绕这些搜索点" or "下面继续覆盖这些关键词". Write it like a normal natural post.
+1. Keep the title unchanged.
+2. In the first 2 sentences of the body, naturally include the core keyword and at least 2 search phrases.
+3. Cover at least 3 different search phrases across the body, and reinforce the core keyword once near the ending.
+4. Output 6-10 tags and only use the provided search phrases or tags.
+5. Do not use meta SEO phrasing such as "围绕这些搜索点" or "下面继续覆盖这些关键词". Write it like a normal natural post.
 
 Current issues:
 ${audit.issues.length > 0 ? audit.issues.map((item, index) => `${index + 1}. ${item}`).join('\n') : 'None'}
 
-Current content:
----标题---
+Current title (keep as-is):
 ${note?.title || ''}
+ 
+Current content:
 ---正文---
 ${note?.content || ''}
 ---标签---
 ${note?.tags || ''}
 
 Output strictly in this format:
----标题---
-rewritten title
 ---正文---
 rewritten body
 ---标签---

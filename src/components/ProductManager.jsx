@@ -4,6 +4,7 @@ import { COVER_TEMPLATES } from '../templates/coverTemplates.js'
 import CoverCanvas from './CoverCanvas.jsx'
 import { keywordPoolToText, keywordTextToPool, normalizeSeoConfig } from '../services/seoService.js'
 import { normalizeCoverVariants, syncLegacyCoverFields, createBlankCoverVariant } from '../services/coverVariantService.js'
+import { normalizeTitleVariants, createBlankTitleVariant, validateTitleVariantAgainstProduct } from '../services/titleVariantService.js'
 
 const splitWords = (input = '') =>
   String(input || '')
@@ -765,6 +766,8 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
   // 灏侀潰鑷畾涔?
   const [coverEditing, setCoverEditing] = useState(null)
   const [coverForm, setCoverForm] = useState([])
+  const [titleEditing, setTitleEditing] = useState(null)
+  const [titleForm, setTitleForm] = useState([])
   const [seoEditing, setSeoEditing] = useState(null)
   const [seoForm, setSeoForm] = useState(buildSeoForm({ seoConfig: {} }))
   const [seoKeywordSyncOpen, setSeoKeywordSyncOpen] = useState(false)
@@ -997,6 +1000,59 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
       } : p),
     })
     closeCoverEditor()
+  }
+
+  const handleEditTitles = (product) => {
+    setTitleEditing(product.id)
+    setTitleForm(normalizeTitleVariants(product))
+  }
+
+  const handleAddTitleVariant = () => {
+    setTitleForm(prev => [...prev, createBlankTitleVariant('manual')])
+  }
+
+  const handleUpdateTitleVariant = (variantId, patch) => {
+    setTitleForm(prev => prev.map(item => item.id === variantId ? { ...item, ...patch } : item))
+  }
+
+  const handleToggleTitleVariant = (variantId) => {
+    setTitleForm(prev => prev.map(item => item.id === variantId ? { ...item, enabled: item.enabled === false } : item))
+  }
+
+  const handleDeleteTitleVariant = (variantId) => {
+    setTitleForm(prev => prev.filter(item => item.id !== variantId))
+  }
+
+  const closeTitleEditor = () => {
+    setTitleEditing(null)
+    setTitleForm([])
+  }
+
+  const handleSaveTitles = () => {
+    if (!titleEditing) return
+
+    onUpdateShop({
+      ...shop,
+      products: products.map((p) => {
+        if (p.id !== titleEditing) return p
+        return {
+          ...p,
+          titleVariants: titleForm
+            .map(item => ({
+              ...item,
+              title: String(item.title || '').trim(),
+              formula: String(item.formula || '').trim(),
+              enabled: item.enabled !== false,
+              source: String(item.source || 'manual').trim() || 'manual',
+              createdAt: item.createdAt || new Date().toISOString(),
+            }))
+            .filter(item => item.title),
+          titleVariantMode: p.titleVariantMode || 'prefer_pool',
+          titleVariantCursor: Number.isFinite(Number(p.titleVariantCursor)) ? Number(p.titleVariantCursor) : 0,
+        }
+      }),
+    })
+    closeTitleEditor()
   }
 
   const handleEditSeo = (product) => {
@@ -1626,6 +1682,89 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
     </div>
   )
 
+  const renderTitleEditor = (product) => (
+    <div className="product-inline-editor" style={{
+      background: '#f8f7ff', border: '1px solid #d8d2ff', borderRadius: 12,
+      padding: 20, marginTop: 12,
+    }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
+        标题池 - {product?.name}
+      </h3>
+      <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
+        管理该商品的直出标题。批量生成时会优先顺序取用启用标题；不命中商品相关词的标题不会参与使用。
+      </p>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: '#5b21b6', fontWeight: 600 }}>
+          当前 {titleForm.length} 条
+        </span>
+        <button className="btn-secondary" onClick={handleAddTitleVariant}>新增标题</button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {titleForm.map((item, idx) => {
+          const validation = validateTitleVariantAgainstProduct(product, item.title)
+          return (
+            <div
+              key={item.id}
+              style={{
+                background: '#fff',
+                border: `1px solid ${validation.valid || !item.title ? '#ddd6fe' : '#fecaca'}`,
+                borderRadius: 10,
+                padding: 12,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: 13, color: '#4c1d95' }}>标题 {idx + 1}</strong>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label style={{ fontSize: 12, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={item.enabled !== false}
+                      onChange={() => handleToggleTitleVariant(item.id)}
+                    />
+                    启用
+                  </label>
+                  <button className="btn-danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleDeleteTitleVariant(item.id)}>删除</button>
+                </div>
+              </div>
+
+              <textarea
+                value={item.title}
+                onChange={(e) => handleUpdateTitleVariant(item.id, { title: e.target.value })}
+                rows={2}
+                placeholder="输入要直出的标题"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }}
+              />
+              <div style={{ marginTop: 4, fontSize: 11, color: validation.valid || !item.title ? '#6b7280' : '#b91c1c' }}>
+                {item.title ? (validation.valid ? '已命中商品相关词，可参与批量生成。' : '未命中商品相关词，保存后也不会参与批量生成。') : '请输入标题内容。'}
+              </div>
+
+              <input
+                type="text"
+                value={item.formula || ''}
+                onChange={(e) => handleUpdateTitleVariant(item.id, { formula: e.target.value })}
+                placeholder="公式名（可选）"
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, boxSizing: 'border-box', marginTop: 8 }}
+              />
+            </div>
+          )
+        })}
+
+        {titleForm.length === 0 && (
+          <div style={{ fontSize: 12, color: '#6b7280', padding: '12px 14px', borderRadius: 8, background: '#fff', border: '1px dashed #c4b5fd' }}>
+            还没有标题池内容。你可以先在“标题裂变”里生成并保存，也可以在这里手动补充。
+          </div>
+        )}
+      </div>
+
+      <div className="btn-row" style={{ marginTop: 14 }}>
+        <button className="btn-primary" onClick={handleSaveTitles}>保存标题池</button>
+        <button className="btn-secondary" onClick={closeTitleEditor}>取消</button>
+      </div>
+    </div>
+  )
+
   const renderSeoEditor = (product) => (
     (() => {
       const previewSeo = normalizeSeoConfig(buildSeoPayload(seoForm), product)
@@ -2078,6 +2217,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
             const coverVariants = normalizeCoverVariants(p)
             const hasCover = coverVariants.length > 0
             const coverVariantCount = coverVariants.length
+            const titleVariants = normalizeTitleVariants(p)
+            const titleVariantCount = titleVariants.length
+            const enabledTitleVariantCount = titleVariants.filter(item => item.enabled !== false).length
             const normalizedSeo = normalizeSeoConfig(p.seoConfig || {}, p)
             const hasSeoConfig = Boolean(
               normalizedSeo.seedKeyword ||
@@ -2118,6 +2260,9 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                       {hasCover && (
                         <span style={{ marginLeft: 6, color: '#1565c0', fontWeight: 600 }}>已定制封面（{coverVariantCount}套）</span>
                       )}
+                      {titleVariantCount > 0 && (
+                        <span style={{ marginLeft: 6, color: '#6d28d9', fontWeight: 600 }}>标题池 {enabledTitleVariantCount}/{titleVariantCount}</span>
+                      )}
                       {(p.customSystemPrompt || p.customUserPrompt) && (
                         <span style={{ marginLeft: 6, color: '#e67e22', fontWeight: 600 }}>已定制提示词</span>
                       )}
@@ -2141,6 +2286,10 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
                     <button className="btn-sm" onClick={() => handleEditCover(p)}
                       style={{ background: hasCover ? '#e3f2fd' : undefined }}>
                       {hasCover ? `编辑封面(${coverVariantCount})` : '自定义封面'}
+                    </button>
+                    <button className="btn-sm" onClick={() => handleEditTitles(p)}
+                      style={{ background: titleVariantCount > 0 ? '#f3e8ff' : undefined }}>
+                      {titleVariantCount > 0 ? `标题池(${titleVariantCount})` : '标题池'}
                     </button>
                     <button className="btn-sm" onClick={() => handleEditPrompt(p)}
                       style={{ background: (p.customSystemPrompt || p.customUserPrompt) ? '#fff3e0' : undefined }}>
@@ -2226,6 +2375,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
 
                 {refEditing === p.id && renderRefEditor(p)}
                 {promptEditing === p.id && renderPromptEditor(p)}
+                {titleEditing === p.id && renderTitleEditor(p)}
                 {seoEditing === p.id && renderSeoEditor(p)}
                 {coverEditing === p.id && renderCoverEditor(p)}
               </div>
