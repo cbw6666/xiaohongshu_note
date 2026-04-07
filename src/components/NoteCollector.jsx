@@ -1428,7 +1428,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
               disabled={isBusy}
               title="把采集到的标题导入标题裂变输入框"
             >
-              馃摜 导入标题裂变
+              🔥 导入标题裂变
             </button>
           )}
           {(isBusy || isResting) && !isOneClick && (

@@ -6,20 +6,72 @@ const KEYS = {
   FISSION: 'rb_fission',
 }
 
+const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
+
+function createProfile(overrides = {}) {
+  return {
+    id: overrides.id || `cfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: overrides.name || '默认配置',
+    apiKey: overrides.apiKey || '',
+    endpointId: overrides.endpointId || '',
+    baseUrl: overrides.baseUrl || DEFAULT_BASE_URL,
+  }
+}
+
+function normalizeSettingsState(raw) {
+  // 新版：多配置结构
+  if (raw && Array.isArray(raw.profiles) && raw.profiles.length > 0) {
+    const profiles = raw.profiles.map((item, idx) => createProfile({
+      ...item,
+      name: item?.name || `配置${idx + 1}`,
+      baseUrl: item?.baseUrl || DEFAULT_BASE_URL,
+    }))
+
+    const activeProfileId = raw.activeProfileId && profiles.some(p => p.id === raw.activeProfileId)
+      ? raw.activeProfileId
+      : profiles[0].id
+
+    const activeProfile = profiles.find(p => p.id === activeProfileId) || profiles[0]
+
+    return {
+      ...raw,
+      apiKey: activeProfile.apiKey || '',
+      endpointId: activeProfile.endpointId || '',
+      baseUrl: activeProfile.baseUrl || DEFAULT_BASE_URL,
+      profiles,
+      activeProfileId,
+    }
+  }
+
+  // 旧版：单配置结构 -> 自动迁移为多配置
+  const legacyProfile = createProfile({
+    id: 'cfg_legacy_default',
+    name: '字节方舟',
+    apiKey: raw?.apiKey || '',
+    endpointId: raw?.endpointId || '',
+    baseUrl: raw?.baseUrl || DEFAULT_BASE_URL,
+  })
+
+  return {
+    apiKey: legacyProfile.apiKey,
+    endpointId: legacyProfile.endpointId,
+    baseUrl: legacyProfile.baseUrl,
+    profiles: [legacyProfile],
+    activeProfileId: legacyProfile.id,
+  }
+}
+
 export function loadSettings() {
   try {
     const raw = localStorage.getItem(KEYS.SETTINGS)
-    return raw ? JSON.parse(raw) : {
-      apiKey: '',
-      endpointId: '',
-      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    }
-  } catch { return { apiKey: '', endpointId: '', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' } }
+    if (!raw) return normalizeSettingsState(null)
+    return normalizeSettingsState(JSON.parse(raw))
+  } catch { return normalizeSettingsState(null) }
 }
 
 export function saveSettings(settings) {
   try {
-    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings))
+    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(normalizeSettingsState(settings)))
   } catch (e) {
     console.warn('保存设置失败:', e.message)
   }

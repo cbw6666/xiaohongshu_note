@@ -518,6 +518,8 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
             let noteTags = ''
             let noteCoverTitle = ''
             let noteCoverSubtitle = ''
+            let seoPassed = seoPlan ? true : undefined
+            let seoIssues = seoPlan ? [] : undefined
             let isError = false
             let innerImageCount = 0
 
@@ -618,6 +620,9 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                     seoPlan,
                   )
 
+                  seoPassed = seoAudit.pass
+                  seoIssues = seoAudit.pass ? [] : [...seoAudit.issues]
+
                   if (!seoAudit.pass) {
                     setProgress({
                       current: count,
@@ -633,36 +638,69 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                       },
                       seoPlan,
                     )
-                    const repairRaw = await callAI(settings, repairMessages)
-                    const repaired = parseNoteResponse(repairRaw)
+                    try {
+                      const repairRaw = await callAI(settings, repairMessages)
+                      const repaired = parseNoteResponse(repairRaw)
 
-                    attemptContent = repaired.content || attemptContent
-                    attemptTags = repaired.tags || attemptTags
+                      attemptContent = repaired.content || attemptContent
+                      attemptTags = repaired.tags || attemptTags
 
-                    const repairedSeo = enforceSeoResult(
-                      {
-                        title: attemptTitle,
-                        content: attemptContent,
-                        tags: attemptTags,
-                        coverTitle: attemptCoverTitle,
-                      },
-                      seoPlan,
-                    )
+                      const repairedSeo = enforceSeoResult(
+                        {
+                          title: attemptTitle,
+                          content: attemptContent,
+                          tags: attemptTags,
+                          coverTitle: attemptCoverTitle,
+                        },
+                        seoPlan,
+                      )
 
-                    attemptContent = repairedSeo.content || attemptContent
-                    attemptTags = repairedSeo.tags || attemptTags
+                      attemptContent = repairedSeo.content || attemptContent
+                      attemptTags = repairedSeo.tags || attemptTags
 
-                    seoAudit = auditSeoTextResult(
-                      {
-                        title: attemptTitle,
-                        content: attemptContent,
-                        tags: attemptTags,
-                      },
-                      seoPlan,
-                    )
+                      seoAudit = auditSeoTextResult(
+                        {
+                          title: attemptTitle,
+                          content: attemptContent,
+                          tags: attemptTags,
+                        },
+                        seoPlan,
+                      )
+                    } catch (seoRepairErr) {
+                      seoAudit = auditSeoTextResult(
+                        {
+                          title: attemptTitle,
+                          content: attemptContent,
+                          tags: attemptTags,
+                        },
+                        seoPlan,
+                      )
+                      seoAudit.issues = [
+                        ...(seoAudit.issues || []),
+                        `SEO修复请求失败: ${seoRepairErr?.message || '未知错误'}`,
+                      ]
+                    }
+
+                    seoPassed = seoAudit.pass
+                    seoIssues = seoAudit.pass ? [] : [...seoAudit.issues]
 
                     if (!seoAudit.pass) {
-                      throw new Error(`SEO规则未通过: ${seoAudit.issues.join('；')}`)
+                      setProgress({
+                        current: count,
+                        total: totalNotes,
+                        text: `${shop.name} / ${account.name} / ${product.name.slice(0, 10)}... 第${i + 1}篇 SEO未完全通过，已降级放行`,
+                      })
+                      console.warn('SEO校验未通过，降级放行', {
+                        shopId: shop.id,
+                        shopName: shop.name,
+                        productId: product.id,
+                        productName: cleanName,
+                        accountId: account.id,
+                        accountName: account.name,
+                        noteIndex: i,
+                        issues: seoAudit.issues || [],
+                        metrics: seoAudit.metrics || {},
+                      })
                     }
                   }
                 }
@@ -840,6 +878,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                 coverTitle: noteCoverTitle,
                 coverSubtitle: noteCoverSubtitle,
                 innerImageCount,
+                ...(seoPlan ? { seoPassed: Boolean(seoPassed), seoIssues: Array.isArray(seoIssues) ? seoIssues : [] } : {}),
                 createdAt: new Date().toISOString(),
               })
             } else {
