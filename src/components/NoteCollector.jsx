@@ -29,7 +29,7 @@ function formatCountdown(ms) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-export default function NoteCollector({ settings, shops = [], activeShopId, onImportTitlesForFission }) {
+export default function NoteCollector({ settings, shops = [], activeShopId, innerImagesMap = {}, onImportTitlesForFission }) {
   // Excel 数据
   const [excelData, setExcelData] = useState(null) // { headers, columnMapping, rows }
   const [notes, setNotes] = useState([]) // 解析后的笔记列表
@@ -53,6 +53,41 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
   const selectedShop = shops.find(s => s.id === selectedShopId) || null
   const selectedProduct = selectedShop?.products?.find(p => p.id === selectedProductId) || null
 
+  const normalizeProductKey = (value = '') =>
+    String(value || '')
+      .replace(/\s+/g, '')
+      .replace(/预览/g, '')
+      .trim()
+      .toLowerCase()
+
+  const getProductForCollectedRow = (row = {}) => {
+    const allProducts = shops.flatMap(shop => shop.products || [])
+    const rowProductId = String(row.productId || '').trim()
+    const rowProductKey = normalizeProductKey(row.productName || '')
+
+    if (rowProductId) {
+      const matchedById = allProducts.find(product => {
+        const itemId = String(extractItemId(product) || '').trim()
+        const productId = String(product?.productId || '').trim()
+        const localId = String(product?.id || '').trim()
+        return rowProductId === itemId || rowProductId === productId || rowProductId === localId
+      })
+      if (matchedById) return matchedById
+    }
+
+    if (rowProductKey) {
+      const matchedByName = allProducts.find(product => normalizeProductKey(product?.name || '') === rowProductKey)
+      if (matchedByName) return matchedByName
+    }
+
+    return selectedProduct || null
+  }
+
+  const getProductInnerImagesForRow = (row = {}) => {
+    const product = getProductForCollectedRow(row)
+    return product?.id ? [...(innerImagesMap?.[product.id] || [])] : []
+  }
+
   // 统一设置
   const [globalSettings, setGlobalSettings] = useState({
     shopName: initShop?.name || '',
@@ -63,6 +98,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
     enableRewrite: true,
     enableHumanize: true,
     enableImageDedup: true,
+    useProductInnerImages: false,
     maxTags: 10,
   })
 
@@ -835,7 +871,8 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
             phase: '下载图片',
             text: `[${batchIdx + 1}/${batches.length}批] 下载第 ${processedCount}/${total} 条的图片...`,
           }))
-          for (let imgIdx = 0; imgIdx < result.images.length; imgIdx++) {
+          const imageDownloadCount = globalSettings.useProductInnerImages ? Math.min(result.images.length, 1) : result.images.length
+          for (let imgIdx = 0; imgIdx < imageDownloadCount; imgIdx++) {
             if (controller.signal.aborted) break
             if (imgIdx > 0) {
               try {
@@ -872,7 +909,22 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
 
         // 第一张图作为封面，其余作为内页图
         const coverImage = downloadedImages[0] || null
-        const innerImages = downloadedImages.slice(1)
+        let innerImages = downloadedImages.slice(1)
+
+        if (globalSettings.useProductInnerImages) {
+          innerImages = getProductInnerImagesForRow(row)
+          if (globalSettings.enableImageDedup && innerImages.length > 0) {
+            setOneClickProgress(prev => ({
+              ...prev,
+              phase: '图片去重',
+              text: `[${batchIdx + 1}/${batches.length}批] 去重第 ${processedCount}/${total} 条的商品内页图...`,
+            }))
+            for (let imgIdx = 0; imgIdx < innerImages.length; imgIdx++) {
+              if (controller.signal.aborted) break
+              innerImages[imgIdx] = await deduplicateImage(innerImages[imgIdx], { addBorder: false })
+            }
+          }
+        }
 
         try {
           await writer.appendRow({
@@ -911,7 +963,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
           originalContent: result.content || '',
           tags: finalTags,
           images: result.images || [],
-          downloadedImages,
+          downloadedImages: globalSettings.useProductInnerImages ? [coverImage, ...innerImages].filter(Boolean) : downloadedImages,
           author: result.author || '',
           shopName: row.shopName || globalSettings.shopName,
           accountName: row.accountName || globalSettings.accountName,
@@ -922,7 +974,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
           parseError: '',
           partial: result.partial || false,
           rewritten: globalSettings.enableRewrite,
-          deduplicated: globalSettings.enableImageDedup && downloadedImages.length > 0,
+          deduplicated: globalSettings.enableImageDedup && (downloadedImages.length > 0 || innerImages.length > 0),
         }
         setNotes(prev => [...prev, note])
       }
@@ -970,7 +1022,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
     }))
     abortRef.current = null
     streamWriterRef.current = null
-  }, [excelData, notes, globalSettings, settings, speedMode])
+  }, [excelData, notes, globalSettings, settings, speedMode, shops, selectedProduct, innerImagesMap])
 
   // ============ 停止操作 ============
   const handleStop = () => {
@@ -1181,8 +1233,8 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
           background: '#fff8f0', borderRadius: 10, padding: 16,
           marginBottom: 16, border: '1px solid #ffe0c0',
         }}>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10, color: '#3f2f1f' }}>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
               <input
                 type="checkbox"
                 checked={globalSettings.enableRewrite}
@@ -1190,7 +1242,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
               />
               启用 AI 改写
             </label>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
               <input
                 type="checkbox"
                 checked={globalSettings.enableHumanize}
@@ -1198,7 +1250,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
               />
               去 AI 味
             </label>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
               <input
                 type="checkbox"
                 checked={globalSettings.enableImageDedup}
@@ -1206,14 +1258,27 @@ export default function NoteCollector({ settings, shops = [], activeShopId, onIm
               />
               图片去重
             </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={globalSettings.useProductInnerImages}
+                onChange={e => setGlobalSettings(p => ({ ...p, useProductInnerImages: e.target.checked }))}
+              />
+              使用商品内页图
+            </label>
           </div>
+          {globalSettings.useProductInnerImages && (
+            <div style={{ fontSize: 12, color: '#8a5a00', marginBottom: 10 }}>
+              已开启：导出 Excel 时只采集笔记封面，内页图使用商品管理中对应商品上传的内页图；没有上传时内页图留空。
+            </div>
+          )}
           {globalSettings.enableRewrite && (
             <textarea
               value={globalSettings.rewritePrompt}
               onChange={e => setGlobalSettings(p => ({ ...p, rewritePrompt: e.target.value }))}
               placeholder="自定义改写要求（可选），例如：改写为测评风格、突出性价比..."
               rows={2}
-              style={{ width: '100%', fontSize: 13, borderRadius: 8, border: '1px solid #e0d0c0', padding: '8px 10px' }}
+              style={{ width: '100%', fontSize: 13, borderRadius: 8, border: '1px solid #c9a989', padding: '8px 10px', color: '#2f261d', background: '#fffdf9' }}
             />
           )}
         </div>

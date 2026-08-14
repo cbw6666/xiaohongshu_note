@@ -24,6 +24,7 @@ import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
 import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
 import { splitExcelFile } from '../utils/excelSplitUtils.js'
 import { renderCoverToBlob } from '../utils/coverRenderer.js'
+import { buildAutoCoverCopy } from '../services/coverCopyService.js'
 import { normalizeCoverVariants, pickCoverVariant } from '../services/coverVariantService.js'
 import { normalizeTitleVariants, pickTitleVariant, validateTitleVariantAgainstProduct } from '../services/titleVariantService.js'
 
@@ -87,6 +88,53 @@ function normalizeTitleKey(title = '') {
   return String(title || '')
     .replace(/[\s,，。.!！？?、:：;；"'“”‘’()（）【】\[\]<>《》\-—_~]/g, '')
     .toLowerCase()
+}
+
+function buildCoverCopyKey(templateId = '', title = '', subtitle = '') {
+  return [templateId || '', normalizeTitleKey(title), normalizeTitleKey(subtitle)].join('||')
+}
+
+function buildCoverTemplateCandidates({
+  preferredTemplateId = '',
+  activeVariant = null,
+  product = {},
+  productCoverVariants = [],
+  fallbackTemplateIds = [],
+}) {
+  const candidates = [
+    preferredTemplateId,
+    activeVariant?.coverTemplateId,
+    product?.customCoverTemplateId,
+    ...(Array.isArray(productCoverVariants) ? productCoverVariants.map((item) => item?.coverTemplateId) : []),
+    ...(Array.isArray(fallbackTemplateIds) ? fallbackTemplateIds : []),
+  ].filter(Boolean)
+
+  return [...new Set(candidates)]
+}
+
+function buildCoverTitleVariation(title = '', subtitle = '') {
+  const compactTitle = String(title || '').replace(/\s+/g, '').trim()
+  if (!compactTitle) return ''
+
+  const phraseCandidates = compactTitle
+    .split(/[，。！？!?；;：:、|/]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  const shorterPhrase = phraseCandidates.find((item) => item.length >= 6 && item.length < compactTitle.length)
+  if (shorterPhrase) return shorterPhrase
+
+  if (compactTitle.length > 12) {
+    return compactTitle.slice(0, 12)
+  }
+
+  const compactSubtitle = String(subtitle || '').replace(/\s+/g, '').trim()
+  if (compactSubtitle) {
+    const merged = `${compactTitle}${compactSubtitle}`
+    return merged.slice(0, Math.min(14, merged.length))
+  }
+
+  return compactTitle
 }
 
 function sanitizeProductName(name = '') {
@@ -455,6 +503,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
     const recentTitles = []
     const recentTitleStructures = []
     const titleCursorUpdates = new Map()
+    const seenCoverKeys = new Set()
 
     // 对封面模板列表做 Fisher-Yates 打散，避免顺序模式过于规律
     const shuffledCoverTemplates = [...selectedCoverTemplates]
@@ -518,6 +567,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
             let noteTags = ''
             let noteCoverTitle = ''
             let noteCoverSubtitle = ''
+            let noteCoverTemplateId = coverTemplateId
             let seoPassed = seoPlan ? true : undefined
             let seoIssues = seoPlan ? [] : undefined
             let isError = false
@@ -568,8 +618,14 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                 let attemptTitle = finalTitle || `${cleanName}种草`
                 let attemptContent = parsed.content || raw
                 let attemptTags = parsed.tags || ''
-                let attemptCoverTitle = activeCoverVariant?.coverTitle || product.customCoverTitle || parsed.coverTitle || cleanName.slice(0, 8)
-                let attemptCoverSubtitle = activeCoverVariant?.coverSubtitle || product.customCoverSubtitle || parsed.coverSubtitle || product.sellingPoints?.slice(0, 15) || ''
+                const autoCoverCopy = buildAutoCoverCopy({
+                  title: attemptTitle || parsed.title,
+                  content: attemptContent,
+                  productName: cleanName,
+                  sellingPoints: product.sellingPoints || '',
+                })
+                let attemptCoverTitle = activeCoverVariant?.coverTitle || product.customCoverTitle || parsed.coverTitle || autoCoverCopy.coverTitle
+                let attemptCoverSubtitle = activeCoverVariant?.coverSubtitle || product.customCoverSubtitle || parsed.coverSubtitle || autoCoverCopy.coverSubtitle
 
                 // 去AI味（跳过标题，只处理正文，保护爆款标题公式）
                 if (settings.apiKey && attemptContent) {
@@ -705,6 +761,43 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                   }
                 }
 
+                const coverTemplateCandidates = buildCoverTemplateCandidates({
+                  preferredTemplateId: coverTemplateId,
+                  activeVariant: activeCoverVariant,
+                  product,
+                  productCoverVariants,
+                  fallbackTemplateIds: safeFallbackCoverTemplates,
+                })
+                let finalCoverTemplateId = coverTemplateId
+                let finalCoverTitle = attemptCoverTitle
+                let finalCoverSubtitle = attemptCoverSubtitle
+                let coverKey = buildCoverCopyKey(finalCoverTemplateId, finalCoverTitle, finalCoverSubtitle)
+
+                if (seenCoverKeys.has(coverKey)) {
+                  const alternateTemplateId = coverTemplateCandidates.find((candidate) => (
+                    candidate && !seenCoverKeys.has(buildCoverCopyKey(candidate, finalCoverTitle, finalCoverSubtitle))
+                  ))
+                  if (alternateTemplateId) {
+                    finalCoverTemplateId = alternateTemplateId
+                    coverKey = buildCoverCopyKey(finalCoverTemplateId, finalCoverTitle, finalCoverSubtitle)
+                  }
+                }
+
+                if (seenCoverKeys.has(coverKey)) {
+                  const variedTitle = buildCoverTitleVariation(finalCoverTitle, finalCoverSubtitle)
+                  if (variedTitle && variedTitle !== finalCoverTitle) {
+                    finalCoverTitle = variedTitle
+                    coverKey = buildCoverCopyKey(finalCoverTemplateId, finalCoverTitle, finalCoverSubtitle)
+                  }
+                }
+
+                if (seenCoverKeys.has(coverKey) && finalCoverSubtitle) {
+                  finalCoverSubtitle = ''
+                  coverKey = buildCoverCopyKey(finalCoverTemplateId, finalCoverTitle, finalCoverSubtitle)
+                }
+
+                seenCoverKeys.add(coverKey)
+
                 if (!activeTitleVariant) {
                   const productTermPool = buildProductTermPool(product, cleanName)
                   attemptTitle = lightlyRepairTitleWithProductTerms(attemptTitle, productTermPool)
@@ -784,8 +877,9 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                 noteTitle = attemptTitle
                 noteContent = attemptContent
                 noteTags = attemptTags
-                noteCoverTitle = attemptCoverTitle
-                noteCoverSubtitle = attemptCoverSubtitle
+                noteCoverTitle = finalCoverTitle
+                noteCoverSubtitle = finalCoverSubtitle
+                noteCoverTemplateId = finalCoverTemplateId || coverTemplateId
                 generationSucceeded = true
                 successCount++
               } catch (err) {
@@ -799,8 +893,14 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
               noteTitle = `[生成失败] ${cleanName}`
               noteContent = `错误: ${lastGenerateError?.message || '未知错误'}`
               noteTags = ''
-              noteCoverTitle = activeCoverVariant?.coverTitle || product.customCoverTitle || cleanName.slice(0, 8)
-              noteCoverSubtitle = activeCoverVariant?.coverSubtitle || product.customCoverSubtitle || ''
+              const failedAutoCoverCopy = buildAutoCoverCopy({
+                title: '',
+                content: '',
+                productName: cleanName,
+                sellingPoints: product.sellingPoints || '',
+              })
+              noteCoverTitle = activeCoverVariant?.coverTitle || product.customCoverTitle || failedAutoCoverCopy.coverTitle
+              noteCoverSubtitle = activeCoverVariant?.coverSubtitle || product.customCoverSubtitle || failedAutoCoverCopy.coverSubtitle
               isError = true
               failCount++
             }
@@ -815,7 +915,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
               // 渲染封面图
               let coverImage = null
               try {
-                const blob = await renderCoverToBlob(coverTemplateId, { title: noteCoverTitle, subtitle: noteCoverSubtitle }, count)
+                const blob = await renderCoverToBlob(noteCoverTemplateId, { title: noteCoverTitle, subtitle: noteCoverSubtitle }, count)
                 coverImage = await new Promise(resolve => {
                   const reader = new FileReader()
                   reader.onloadend = () => resolve(reader.result)
@@ -871,7 +971,7 @@ export default function BatchGenerator({ settings, shops, onGenerated, onUpdateS
                 productId: product.id,
                 productItemId: itemId,
                 productName: cleanName,
-                coverTemplateId,
+                coverTemplateId: noteCoverTemplateId,
                 title: noteTitle,
                 content: noteContent,
                 tags: noteTags,

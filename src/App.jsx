@@ -179,6 +179,7 @@ export default function App() {
             settings={settings}
             shops={shops}
             activeShopId={activeShopId}
+            innerImagesMap={innerImagesMap}
             onImportTitlesForFission={handleImportCollectorTitles}
           />
         )}

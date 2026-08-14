@@ -2027,7 +2027,7 @@ export default function ProductManager({ shop, onUpdateShop, settings, innerImag
         </div>
       </div>
       <p className="hint" style={{ marginBottom: 14, fontSize: 12 }}>
-        每个商品支持最多 10 套封面方案。批量生成时按顺序轮换；留空的字段会自动回退到 AI 生成。
+        每个商品支持最多 10 套封面方案。批量生成时按顺序轮换；推荐只指定模板，主标题和副标题留空交给系统自动生成。
       </p>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
