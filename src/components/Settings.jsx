@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { resolveProfileImageGeneration, saveSettings } from '../utils/storage.js'
 
 export default function Settings({ settings, onSave }) {
   const [form, setForm] = useState({ ...settings })
@@ -28,17 +29,17 @@ export default function Settings({ settings, onSave }) {
     setForm({ ...settings })
   }, [settings])
 
+  useEffect(() => () => clearTimeout(debounceRef.current), [])
+
   const updateForm = (next) => {
     setForm(next)
-    setSaved(false)
-
-    // 自动保存（防抖 500ms）
+    saveSettings(next)
+    onSave(next)
+    setSaved(true)
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      onSave(next)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    }, 500)
+      setSaved(false)
+    }, 2000)
   }
 
   const updateActiveProfile = (patch = {}) => {
@@ -56,6 +57,7 @@ export default function Settings({ settings, onSave }) {
       apiKey: nextActive.apiKey || '',
       endpointId: nextActive.endpointId || '',
       baseUrl: nextActive.baseUrl || 'https://ark.cn-beijing.volces.com/api/v3',
+      imageGeneration: resolveProfileImageGeneration(nextActive),
     }
     updateForm(next)
   }
@@ -65,10 +67,10 @@ export default function Settings({ settings, onSave }) {
   }
 
   const handleImageGenerationChange = (key, val) => {
-    updateForm({
-      ...form,
+    const active = getActiveProfile(form)
+    updateActiveProfile({
       imageGeneration: {
-        ...(form.imageGeneration || {}),
+        ...(active.imageGeneration || {}),
         [key]: val,
       },
     })
@@ -84,6 +86,7 @@ export default function Settings({ settings, onSave }) {
       apiKey: selected.apiKey || '',
       endpointId: selected.endpointId || '',
       baseUrl: selected.baseUrl || 'https://ark.cn-beijing.volces.com/api/v3',
+      imageGeneration: resolveProfileImageGeneration(selected),
     })
   }
 
@@ -95,6 +98,15 @@ export default function Settings({ settings, onSave }) {
       apiKey: '',
       endpointId: '',
       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      imageGeneration: {
+        apiKey: '',
+        endpointId: '',
+        baseUrl: '',
+        inheritApiKey: true,
+        inheritBaseUrl: true,
+        size: 'auto',
+        resolution: '2K',
+      },
     }
     updateForm({
       ...form,
@@ -103,6 +115,7 @@ export default function Settings({ settings, onSave }) {
       apiKey: nextProfile.apiKey,
       endpointId: nextProfile.endpointId,
       baseUrl: nextProfile.baseUrl,
+      imageGeneration: resolveProfileImageGeneration(nextProfile),
     })
   }
 
@@ -115,6 +128,7 @@ export default function Settings({ settings, onSave }) {
 
   const activeProfile = getActiveProfile(form)
   const profiles = getProfiles(form)
+  const imageGeneration = activeProfile.imageGeneration || {}
 
   return (
     <div className="panel">
@@ -182,34 +196,55 @@ export default function Settings({ settings, onSave }) {
         <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>图片生成配置</h3>
         <div className="form-group">
           <label>图片生成 API Key</label>
+          <label className="image-generation-inherit-toggle">
+            <input
+              type="checkbox"
+              checked={imageGeneration.inheritApiKey !== false}
+              onChange={e => handleImageGenerationChange('inheritApiKey', e.target.checked)}
+            />
+            沿用当前配置的 API Key
+            <span className={activeProfile.apiKey ? 'inherit-status ready' : 'inherit-status missing'}>
+              {activeProfile.apiKey ? '已配置' : '未配置'}
+            </span>
+          </label>
           <input
             type="password"
-            value={form.imageGeneration?.apiKey || ''}
+            value={imageGeneration.inheritApiKey !== false ? '' : (imageGeneration.apiKey || '')}
             onChange={e => handleImageGenerationChange('apiKey', e.target.value)}
-            placeholder="留空则沿用当前配置的 API Key"
+            disabled={imageGeneration.inheritApiKey !== false}
+            placeholder={imageGeneration.inheritApiKey !== false ? '已沿用当前配置的 API Key' : '输入图片生成专用 API Key'}
           />
         </div>
         <div className="form-group">
           <label>Seedream 接入点 ID</label>
           <input
-            value={form.imageGeneration?.endpointId || ''}
+            value={imageGeneration.endpointId || ''}
             onChange={e => handleImageGenerationChange('endpointId', e.target.value)}
             placeholder="例如 doubao-seedream-4-5-xxxx 或对应接入点 ID"
           />
         </div>
         <div className="form-group">
           <label>图片生成 Base URL</label>
+          <label className="image-generation-inherit-toggle">
+            <input
+              type="checkbox"
+              checked={imageGeneration.inheritBaseUrl !== false}
+              onChange={e => handleImageGenerationChange('inheritBaseUrl', e.target.checked)}
+            />
+            沿用当前配置的 Base URL
+          </label>
           <input
-            value={form.imageGeneration?.baseUrl || ''}
+            value={imageGeneration.inheritBaseUrl !== false ? (activeProfile.baseUrl || '') : (imageGeneration.baseUrl || '')}
             onChange={e => handleImageGenerationChange('baseUrl', e.target.value)}
-            placeholder="留空则使用 https://ark.cn-beijing.volces.com/api/v3"
+            disabled={imageGeneration.inheritBaseUrl !== false}
+            placeholder="https://ark.cn-beijing.volces.com/api/v3"
           />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="form-group">
             <label>生成参考比例</label>
             <select
-              value={form.imageGeneration?.size || 'auto'}
+              value={imageGeneration.size || 'auto'}
               onChange={e => handleImageGenerationChange('size', e.target.value)}
             >
               <option value="auto">自动匹配原封面</option>
@@ -223,7 +258,7 @@ export default function Settings({ settings, onSave }) {
           <div className="form-group">
             <label>清晰度</label>
             <select
-              value={form.imageGeneration?.resolution || '2K'}
+              value={imageGeneration.resolution || '2K'}
               onChange={e => handleImageGenerationChange('resolution', e.target.value)}
             >
               <option value="2K">2K</option>
@@ -241,7 +276,8 @@ export default function Settings({ settings, onSave }) {
       </button>
 
       <p style={{ fontSize: 12, color: '#999', marginTop: 8 }}>
-        💡 可保存多套配置并切换使用；输入后自动保存到浏览器本地
+        💡 每套配置会保存自己的视觉模型参数；输入后立即保存到当前浏览器本地。
+        GitHub Pages 与 localhost 的缓存互不共享。
       </p>
     </div>
   )

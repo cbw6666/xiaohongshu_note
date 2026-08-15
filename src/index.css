@@ -1474,6 +1474,46 @@ body {
   box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.16);
 }
 
+.image-generation-settings .form-group input:disabled {
+  background: #eef2f7;
+  border-color: #d8dee8;
+  color: #657286;
+  cursor: not-allowed;
+}
+
+.image-generation-inherit-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 8px;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #536275 !important;
+  cursor: pointer;
+}
+
+.image-generation-inherit-toggle input {
+  width: auto !important;
+  margin: 0;
+}
+
+.inherit-status {
+  margin-left: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.inherit-status.ready {
+  background: #e7f7ed;
+  color: #247a45;
+}
+
+.inherit-status.missing {
+  background: #fff1e8;
+  color: #b45309;
+}
+
 .image-generation-settings p {
   color: #536275 !important;
 }
