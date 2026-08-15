@@ -1446,6 +1446,38 @@ body {
   background: rgba(14, 28, 44, 0.82);
 }
 
+.image-generation-settings {
+  color: #1f2937;
+}
+
+.image-generation-settings h3,
+.image-generation-settings .form-group label {
+  color: #26364d;
+}
+
+.image-generation-settings .form-group input,
+.image-generation-settings .form-group select {
+  background: #ffffff;
+  border-color: #cfd7e6;
+  color: #172033;
+}
+
+.image-generation-settings .form-group input::placeholder {
+  color: #738197;
+  opacity: 1;
+}
+
+.image-generation-settings .form-group input:focus,
+.image-generation-settings .form-group select:focus {
+  background: #ffffff;
+  border-color: #4f8cff;
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.16);
+}
+
+.image-generation-settings p {
+  color: #536275 !important;
+}
+
 .btn-primary {
   background: linear-gradient(135deg, #77a6ff, #62d6ff);
   color: #12253b;

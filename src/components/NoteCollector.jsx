@@ -5,6 +5,7 @@ import { rewriteContent, rewriteTitle } from '../services/rewriteService.js'
 import { calcTitleLen, buildRetitlePrompt, callAI } from '../services/aiService.js'
 import { deduplicateImage, randomBorderColor } from '../utils/imageDeduplicator.js'
 import { humanizeNote } from '../services/humanizerService.js'
+import { redrawCoverImage } from '../services/imageGenerationService.js'
 import { createStreamWriter } from '../utils/streamExportUtils.js'
 import { mergeExcelFiles } from '../utils/excelMergeUtils.js'
 import { shuffleExcelRows } from '../utils/excelShuffleUtils.js'
@@ -99,6 +100,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, inne
     enableHumanize: true,
     enableImageDedup: true,
     useProductInnerImages: false,
+    enableCoverRedraw: false,
     maxTags: 10,
   })
 
@@ -886,6 +888,30 @@ export default function NoteCollector({ settings, shops = [], activeShopId, inne
             if (base64) downloadedImages.push(base64)
           }
 
+          let coverRedrawStatus = 'skipped'
+          let coverRedrawError = ''
+
+          if (globalSettings.enableCoverRedraw && downloadedImages[0]) {
+            setOneClickProgress(prev => ({
+              ...prev,
+              phase: '重绘封面',
+              text: `[${batchIdx + 1}/${batches.length}批] AI 重绘第 ${processedCount}/${total} 条的封面...`,
+            }))
+            try {
+              downloadedImages[0] = await redrawCoverImage(downloadedImages[0], settings, {
+                signal: controller.signal,
+              })
+              coverRedrawStatus = 'success'
+            } catch (err) {
+              coverRedrawStatus = 'failed'
+              coverRedrawError = err?.message || '封面重绘失败'
+              console.warn('封面重绘失败，已回退原封面:', err)
+            }
+          }
+
+          result.coverRedrawStatus = coverRedrawStatus
+          result.coverRedrawError = coverRedrawError
+
           // 图片去重（同一篇笔记所有图片共享同一个边框颜色）
           if (globalSettings.enableImageDedup && downloadedImages.length > 0) {
             setOneClickProgress(prev => ({
@@ -895,6 +921,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, inne
             }))
             const noteBorderColor = randomBorderColor()
             for (let imgIdx = 0; imgIdx < downloadedImages.length; imgIdx++) {
+              if (coverRedrawStatus === 'success' && imgIdx === 0) continue
               downloadedImages[imgIdx] = await deduplicateImage(downloadedImages[imgIdx], { borderColor: noteBorderColor })
             }
           }
@@ -975,6 +1002,8 @@ export default function NoteCollector({ settings, shops = [], activeShopId, inne
           partial: result.partial || false,
           rewritten: globalSettings.enableRewrite,
           deduplicated: globalSettings.enableImageDedup && (downloadedImages.length > 0 || innerImages.length > 0),
+          coverRedrawStatus: result.coverRedrawStatus || 'skipped',
+          coverRedrawError: result.coverRedrawError || '',
         }
         setNotes(prev => [...prev, note])
       }
@@ -1266,10 +1295,23 @@ export default function NoteCollector({ settings, shops = [], activeShopId, inne
               />
               使用商品内页图
             </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={globalSettings.enableCoverRedraw}
+                onChange={e => setGlobalSettings(p => ({ ...p, enableCoverRedraw: e.target.checked }))}
+              />
+              封面 AI 重绘
+            </label>
           </div>
           {globalSettings.useProductInnerImages && (
             <div style={{ fontSize: 12, color: '#8a5a00', marginBottom: 10 }}>
               已开启：导出 Excel 时只采集笔记封面，内页图使用商品管理中对应商品上传的内页图；没有上传时内页图留空。
+            </div>
+          )}
+          {globalSettings.enableCoverRedraw && (
+            <div style={{ fontSize: 12, color: '#8a5a00', marginBottom: 10 }}>
+              已开启：导出 Excel 前会调用设置页里的 Seedream 图生图配置重绘采集封面；失败时自动回退原封面。
             </div>
           )}
           {globalSettings.enableRewrite && (
@@ -1382,7 +1424,7 @@ export default function NoteCollector({ settings, shops = [], activeShopId, inne
               {/* 阶段指示器 */}
               {oneClickProgress && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  {['采集', '改写', '去AI味', '下载图片', '图片去重', '写入'].map(phase => (
+                  {['采集', '改写', '去AI味', '下载图片', '重绘封面', '图片去重', '写入'].map(phase => (
                     <span key={phase} style={{
                       padding: '2px 10px', borderRadius: 12, fontSize: 11,
                       background: oneClickProgress.phase === phase
@@ -1643,6 +1685,8 @@ function NoteCard({ note, index, expanded, onToggle, onUpdate, onDelete, editing
             {note.downloadedImages?.length > 0 && `${note.downloadedImages.length}张图 · `}
             {note.rewritten && '✍️已改写 · '}
             {note.deduplicated && '🖼️已去重'}
+            {note.coverRedrawStatus === 'success' && <span style={{ color: '#2e7d32', marginLeft: 6 }}>封面已重绘</span>}
+            {note.coverRedrawStatus === 'failed' && <span title={note.coverRedrawError || ''} style={{ color: '#d32f2f', marginLeft: 6 }}>封面重绘失败</span>}
           </div>
         </div>
 

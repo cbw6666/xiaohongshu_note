@@ -7,6 +7,13 @@ const KEYS = {
 }
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
+const DEFAULT_IMAGE_GENERATION = {
+  apiKey: '',
+  endpointId: '',
+  baseUrl: DEFAULT_BASE_URL,
+  size: 'auto',
+  resolution: '2K',
+}
 
 function createProfile(overrides = {}) {
   return {
@@ -19,6 +26,17 @@ function createProfile(overrides = {}) {
 }
 
 function normalizeSettingsState(raw) {
+  const imageResolution = ['2K', '4K'].includes(raw?.imageGeneration?.resolution)
+    ? raw.imageGeneration.resolution
+    : '2K'
+  const imageGeneration = {
+    ...DEFAULT_IMAGE_GENERATION,
+    ...(raw?.imageGeneration || {}),
+    baseUrl: raw?.imageGeneration?.baseUrl || DEFAULT_BASE_URL,
+    size: raw?.imageGeneration?.size || 'auto',
+    resolution: imageResolution,
+  }
+
   // 新版：多配置结构
   if (raw && Array.isArray(raw.profiles) && raw.profiles.length > 0) {
     const profiles = raw.profiles.map((item, idx) => createProfile({
@@ -40,6 +58,7 @@ function normalizeSettingsState(raw) {
       baseUrl: activeProfile.baseUrl || DEFAULT_BASE_URL,
       profiles,
       activeProfileId,
+      imageGeneration,
     }
   }
 
@@ -58,6 +77,7 @@ function normalizeSettingsState(raw) {
     baseUrl: legacyProfile.baseUrl,
     profiles: [legacyProfile],
     activeProfileId: legacyProfile.id,
+    imageGeneration,
   }
 }
 

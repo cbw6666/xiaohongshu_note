@@ -64,6 +64,16 @@ export default function Settings({ settings, onSave }) {
     updateActiveProfile({ [key]: val })
   }
 
+  const handleImageGenerationChange = (key, val) => {
+    updateForm({
+      ...form,
+      imageGeneration: {
+        ...(form.imageGeneration || {}),
+        [key]: val,
+      },
+    })
+  }
+
   const handleSwitchProfile = (profileId) => {
     const profiles = getProfiles(form)
     const selected = profiles.find(item => item.id === profileId)
@@ -160,6 +170,70 @@ export default function Settings({ settings, onSave }) {
           onChange={e => handleChange('baseUrl', e.target.value)}
           placeholder="https://xxx.com/v1"
         />
+      </div>
+
+      <div className="image-generation-settings" style={{
+        margin: '18px 0 14px',
+        padding: 14,
+        border: '1px solid #e5e7eb',
+        borderRadius: 8,
+        background: '#fafafa',
+      }}>
+        <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>图片生成配置</h3>
+        <div className="form-group">
+          <label>图片生成 API Key</label>
+          <input
+            type="password"
+            value={form.imageGeneration?.apiKey || ''}
+            onChange={e => handleImageGenerationChange('apiKey', e.target.value)}
+            placeholder="留空则沿用当前配置的 API Key"
+          />
+        </div>
+        <div className="form-group">
+          <label>Seedream 接入点 ID</label>
+          <input
+            value={form.imageGeneration?.endpointId || ''}
+            onChange={e => handleImageGenerationChange('endpointId', e.target.value)}
+            placeholder="例如 doubao-seedream-4-5-xxxx 或对应接入点 ID"
+          />
+        </div>
+        <div className="form-group">
+          <label>图片生成 Base URL</label>
+          <input
+            value={form.imageGeneration?.baseUrl || ''}
+            onChange={e => handleImageGenerationChange('baseUrl', e.target.value)}
+            placeholder="留空则使用 https://ark.cn-beijing.volces.com/api/v3"
+          />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="form-group">
+            <label>生成参考比例</label>
+            <select
+              value={form.imageGeneration?.size || 'auto'}
+              onChange={e => handleImageGenerationChange('size', e.target.value)}
+            >
+              <option value="auto">自动匹配原封面</option>
+              <option value="1:1">1:1</option>
+              <option value="3:4">3:4</option>
+              <option value="4:3">4:3</option>
+              <option value="9:16">9:16</option>
+              <option value="16:9">16:9</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>清晰度</label>
+            <select
+              value={form.imageGeneration?.resolution || '2K'}
+              onChange={e => handleImageGenerationChange('resolution', e.target.value)}
+            >
+              <option value="2K">2K</option>
+              <option value="4K">4K</option>
+            </select>
+          </div>
+        </div>
+        <p style={{ fontSize: 12, color: '#777', margin: '2px 0 0' }}>
+          用于“笔记采集”里的封面 AI 重绘；最终图片会自动处理成和原封面相同的像素尺寸。
+        </p>
       </div>
 
       <button className="btn-primary" onClick={handleSave}>
